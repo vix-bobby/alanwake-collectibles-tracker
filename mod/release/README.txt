@@ -8,7 +8,7 @@ Tested only with the Steam version, on Windows and on Linux (Steam Deck).
 
 REQUIREMENTS
 - The original Alan Wake (2010) on Steam, on Windows or Linux (Steam Deck).
-  Not Alan Wake Remastered, and not American Nightmare.
+  Not Alan Wake Remastered.
 - GOG and Epic versions are not supported: the mod finds your profile through Steam.
 - The counts in menus need the current Steam version of AlanWake.exe (dated 2020-05-15).
   On any other version they switch themselves off.
@@ -72,8 +72,7 @@ The mod reads your profile and checkpoint files, and writes only its settings an
 does not use the network. As with any DLL of this kind, an antivirus may flag it.
 
 TESTED
-Steam version only, on Windows and on Linux (Steam Deck). The small menu text was aligned
-at 2560x1440; if it looks off line on your screen, menu_small_text=0 avoids that.
+Steam version only, on Windows and on Linux (Steam Deck).
 
 LICENCE
 MIT, copyright vix-bobby: you may share and adapt this mod. See

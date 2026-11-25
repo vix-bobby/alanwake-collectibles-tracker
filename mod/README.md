@@ -63,5 +63,5 @@ on are described at the top of `src/menu.c`; on any other build they are not ins
 overlay does not depend on it.
 
 Known limits: Steam only (the profile is found through Steam); English text; long chapter lines
-may not fit narrow screens; the small-text alignment was measured at 2560x1440; the automated
+may not fit narrow screens; the automated
 Direct3D test runs windowed only and without the Steam overlay.
