@@ -1,0 +1,16 @@
+# build output and releases
+mod/build/
+mod/releases/
+dist/
+__pycache__/
+
+# third-party clones (see README.md)
+vendor/
+
+# a player's own files, and what is generated from them
+samples/
+reports/
+media/
+
+# working notes
+notes/
