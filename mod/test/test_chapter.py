@@ -14,9 +14,10 @@ binary, config, report, save = sys.argv[1:5]
 rows = json.loads(Path(report).read_text())
 LABELS = {"MANUSCRIPTPAGES": "Manuscript pages", "THERMOS": "Coffee thermoses",
           "CANPYRAMIDS": "Can pyramids", "CHESTS": "Chests", "RADIOSHOWS": "Radio shows",
-          "TVSHOWS": "TV shows", "SIGNS": "Signs", "COCONUTSONGS": "Coconut songs",
+          "TVSHOWS": "TV shows", "SIGNS": "Signs",
           "DLC1_ALARMCLOCKS": "Alarm clocks", "DLC1_CARDBOARDCUTOUTS": "Cardboard cutouts",
           "DLC2_NIGHTSPRINGSVIDEOGAMES": "Video games"}
+rows = [r for r in rows if r["category"] in LABELS]  # the mod shows these only
 EPISODES = [(1, 2, 3), (4, 5), (9, 10), (11, 12, 13), (14, 15), (16, 17), (100,), (200,)]
 
 

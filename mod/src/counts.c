@@ -56,7 +56,7 @@ static const struct entry {
 static const char *const NAMES[CAT_COUNT][2] = {
     {"page", "pages"},       {"thermos", "thermos"}, {"pyramid", "pyramids"},
     {"chest", "chests"},     {"radio", "radios"},    {"TV", "TVs"},
-    {"sign", "signs"},       {"song", "songs"},      {"clock", "clocks"},
+    {"sign", "signs"},       {"clock", "clocks"},
     {"cutout", "cutouts"},   {"video game", "video games"},
 };
 

@@ -11,7 +11,6 @@ const struct category CATEGORIES[CAT_COUNT] = {
     {"RADIOSHOWS", "Radio shows", 11},
     {"TVSHOWS", "TV shows", 14},
     {"SIGNS", "Signs", 25},
-    {"COCONUTSONGS", "Coconut songs", 2},
     {"DLC1_ALARMCLOCKS", "Alarm clocks", 10},
     {"DLC1_CARDBOARDCUTOUTS", "Cardboard cutouts", 6},
     {"DLC2_NIGHTSPRINGSVIDEOGAMES", "Video games", 10},

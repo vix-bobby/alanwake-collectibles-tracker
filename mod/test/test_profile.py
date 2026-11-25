@@ -18,6 +18,7 @@ for line in out.splitlines():
     head, numbers = line.split(":")
     got[head.split()[0]] = {int(n) for n in numbers.split()}
 expected = read_profile(config)
+expected.pop("COCONUTSONGS", None)  # not shown by the mod
 assert got == expected, {k: (got.get(k), expected.get(k)) for k in expected if got.get(k) != expected.get(k)}
 print("matches collectibles.py:", {k: len(v) for k, v in got.items()})
 

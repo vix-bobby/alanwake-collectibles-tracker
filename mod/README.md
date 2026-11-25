@@ -13,9 +13,8 @@ A `d3d9.dll` that the game loads by itself. No game file is changed.
   list is open, its title shows the total only, e.g. `(N left, +N Nightmare)`, and each
   chapter its own types. Counts follow your profile while the game runs. **F9** shows or
   hides them at once.
-  - `menu_small_text=1` (default) draws the counts in lists smaller than the names. The
-    mouse and the selection highlight then cover the name only. Chapter list titles stay in
-    normal size. `0` writes everything in the normal size.
+  - `menu_small_text=1` (default) draws the counts in lists smaller than the names. Chapter
+    list titles stay in normal size. `0` writes everything in the normal size.
   - `menu_detail=0` shows totals everywhere.
   - `menu_hooks=0` leaves the game's menus completely alone.
 - **Settings:** `alanwake_collectibles.ini`, created next to the game with comments. Keys F1

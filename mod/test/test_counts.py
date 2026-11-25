@@ -16,8 +16,9 @@ ids.update({f"NAME_LEVEL_{n}": (n,) for n in range(1, 18)})
 
 NAMES = {"MANUSCRIPTPAGES": "page", "THERMOS": "thermos", "CANPYRAMIDS": "pyramid",
          "CHESTS": "chest", "RADIOSHOWS": "radio", "TVSHOWS": "TV", "SIGNS": "sign",
-         "COCONUTSONGS": "song", "DLC1_ALARMCLOCKS": "clock", "DLC1_CARDBOARDCUTOUTS": "cutout",
+         "DLC1_ALARMCLOCKS": "clock", "DLC1_CARDBOARDCUTOUTS": "cutout",
          "DLC2_NIGHTSPRINGSVIDEOGAMES": "video game"}
+rows = [r for r in rows if r["category"] in NAMES]  # the mod shows these only
 
 
 def expected(detail):
