@@ -1,4 +1,4 @@
-# Alan Wake collectibles mod (version 0.7.1)
+# Alan Wake collectibles tracker (version 0.7.1)
 
 For the **original Alan Wake (2010), not Alan Wake Remastered**. Tested only with the Steam
 version, on Windows and on Linux (Steam Deck).

@@ -1,5 +1,5 @@
-Alan Wake Collectibles 0.7.1
-============================
+Alan Wake collectibles tracker 0.7.1
+====================================
 
 Shows which collectibles you still have to find, per chapter and episode.
 

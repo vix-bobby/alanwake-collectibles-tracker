@@ -10,7 +10,6 @@ vendor/
 # a player's own files, and what is generated from them
 samples/
 reports/
-media/
 
 # working notes
 notes/
