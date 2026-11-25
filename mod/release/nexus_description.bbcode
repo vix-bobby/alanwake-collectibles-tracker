@@ -27,6 +27,33 @@ The statistics screen only gives game-wide totals. This mod shows [b]what you st
 [*]If you renamed another mod's file to d3d9_next.dll, rename it back to d3d9.dll.
 [/list]
 
+[size=4][b]Settings[/b][/size]
+The first time you start the game with the mod, it creates [b]alanwake_collectibles.ini[/b] in the game folder, next to AlanWake.exe. Open it with any text editor. Edits apply the next time you start the game. Delete the file to restore the defaults.
+
+[b]Options section[/b] (1 = on, 0 = off)
+[list]
+[*][b]overlay[/b] (default 1): show the overlay.
+[*][b]menu_counts[/b] (default 1): show counts in the episode and chapter menus.
+[*][b]menu_detail[/b] (default 1): menu lists show each type left to find; 0 shows totals only.
+[*][b]menu_small_text[/b] (default 1): counts in menu lists are smaller than the names; 0 uses the normal size.
+[*][b]menu_hooks[/b] (default 1): 0 leaves the game's menus completely untouched (no menu counts).
+[/list]
+
+[b]Keys section[/b] (F1 to F24, or none)
+[list]
+[*][b]overlay[/b] (default F8) and [b]menu_counts[/b] (default F9).
+[*][b]menu_detail[/b], [b]menu_small_text[/b] and [b]menu_hooks[/b] (default none) can be given a key too.
+[*]A key switches the option of the same name and saves your choice. It acts at once, except for menu_small_text and menu_hooks, which apply at the next start.
+[*]F5 is the game's default manuscript key, so avoid it.
+[/list]
+
+[b]Position section[/b] (where the overlay sits)
+[list]
+[*][b]corner[/b] (default bottom-left): or top-left, top-right, bottom-right.
+[*][b]margin_x[/b] (default 1): distance from the side, in % of the screen width (0 to 90).
+[*][b]margin_y[/b] (default 9): distance from the top or bottom, in % of the screen height (0 to 90).
+[/list]
+
 [size=4][b]Compatibility[/b][/size]
 [list]
 [*][b]The original Alan Wake (2010) only.[/b] Not for Alan Wake Remastered or American Nightmare.

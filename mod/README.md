@@ -17,9 +17,23 @@ A `d3d9.dll` that the game loads by itself. No game file is changed.
     list titles stay in normal size. `0` writes everything in the normal size.
   - `menu_detail=0` shows totals everywhere.
   - `menu_hooks=0` leaves the game's menus completely alone.
-- **Settings:** `alanwake_collectibles.ini`, created next to the game with comments. Keys F1
-  to F24 can be reassigned there. Edits to the file apply at the next game start; the keys act
-  at once.
+- **Settings:** `alanwake_collectibles.ini`, created next to the game at the first start, with
+  comments. Edits apply at the next game start; deleting the file restores the defaults.
+
+  | Section | Name | Default | Meaning |
+  |---|---|---|---|
+  | `[options]` | `overlay` | 1 | show the overlay |
+  | | `menu_counts` | 1 | show counts in the menus |
+  | | `menu_detail` | 1 | list each type left in menu lists; 0 = totals only |
+  | | `menu_small_text` | 1 | smaller counts in menu lists; 0 = normal size |
+  | | `menu_hooks` | 1 | 0 = leave the menus untouched |
+  | `[keys]` | `overlay`, `menu_counts` | F8, F9 | F1 to F24, or `none` |
+  | | the three other option names | none | same |
+  | `[position]` | `corner` | bottom-left | or top-left, top-right, bottom-right |
+  | | `margin_x`, `margin_y` | 1, 9 | distance from the edges, % of the screen (0 to 90) |
+
+  A key switches the option of the same name and saves the choice. It acts at once, except for
+  `menu_small_text` and `menu_hooks` (next start). F5 is the game's default manuscript key.
 - **Log:** `alanwake_collectibles.log`, next to the game (or in `%TEMP%`).
 
 Install: copy `build/d3d9.dll` next to `AlanWake.exe` (or `./install.sh`). If another mod's

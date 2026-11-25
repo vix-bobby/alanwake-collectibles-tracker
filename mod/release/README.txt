@@ -34,11 +34,32 @@ IN GAME
 - Nightmare-only manuscript pages are counted separately.
 - The mod's text is in English, whatever the game's language.
 
-SETTINGS
-alanwake_collectibles.ini is created next to the game at the first start, with explanations:
-overlay position, keys, smaller or normal menu text, counts per type or totals only.
-Edits to this file apply the next time you start the game. F8 and F9 act at once, and save
-your choice in the file.
+SETTINGS (alanwake_collectibles.ini)
+The file is created in the game folder, next to AlanWake.exe, the first time you start the
+game with the mod. Open it with Notepad. Edits apply the next time you start the game.
+Delete the file to restore the defaults.
+
+[options]          1 = on, 0 = off
+  overlay          1   Show the overlay.
+  menu_counts      1   Show counts in the episode and chapter menus.
+  menu_detail      1   Menu lists show each type left to find; 0 shows totals only.
+  menu_small_text  1   Counts in menu lists are smaller than the names; 0 = normal size.
+  menu_hooks       1   0 leaves the game's menus completely untouched (no menu counts).
+
+[keys]             F1 to F24, or none
+  overlay          F8
+  menu_counts      F9
+  menu_detail      none
+  menu_small_text  none
+  menu_hooks       none
+Each key switches the option of the same name and saves your choice in the file. It acts at
+once, except for menu_small_text and menu_hooks, which apply at the next start. F5 is the
+game's default manuscript key, so avoid it.
+
+[position]         where the overlay sits
+  corner           bottom-left   Or top-left, top-right, bottom-right.
+  margin_x         1             Distance from the side, in % of the screen width (0-90).
+  margin_y         9             Distance from top or bottom, in % of the screen height (0-90).
 
 IF SOMETHING GOES WRONG
 - Menus misbehave: set menu_small_text=0, or menu_hooks=0, in the ini.
