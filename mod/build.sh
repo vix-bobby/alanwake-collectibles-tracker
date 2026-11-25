@@ -7,7 +7,7 @@ CFLAGS="-std=gnu11 -O2 -Wall -Wextra"
 mkdir -p build
 
 $CC $CFLAGS -shared -static -static-libgcc -s -Wl,--kill-at -Wl,--enable-stdcall-fixup \
-    -o build/d3d9.dll src/proxy.c src/profile.c src/counts.c src/settings.c src/label.c src/menu.c src/checkpoint.c src/d3d9.def -ladvapi32 -luser32
+    -o build/d3d9.dll src/proxy.c src/profile.c src/counts.c src/settings.c src/label.c src/menu.c src/checkpoint.c src/steam.c src/d3d9.def -ladvapi32 -luser32
 $CC $CFLAGS -static -o build/harness.exe test/harness.c -luser32
 $CC $CFLAGS -static -o build/menu_test.exe test/menu_test.c src/label.c src/counts.c src/profile.c
 
@@ -35,6 +35,10 @@ if [ "${1:-}" = test ]; then
     scratch=$(mktemp -d "$wintemp/awmod-test.XXXXXX")
     cp build/settings_test.exe "$scratch/"
     (cd "$scratch" && ./settings_test.exe)
+    $CC $CFLAGS -static -o build/steam_test.exe test/steam_test.c src/steam.c
+    mkdir "$scratch/steam"
+    cp build/steam_test.exe "$scratch/steam/"
+    (cd "$scratch/steam" && ./steam_test.exe)
     rm -rf "$scratch"
     rm -f build/alanwake_collectibles.ini
     (

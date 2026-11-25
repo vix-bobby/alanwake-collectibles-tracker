@@ -19,6 +19,7 @@
 #include "menu.h"
 #include "profile.h"
 #include "settings.h"
+#include "steam.h"
 
 #define MOD_VERSION "0.7.1"
 
@@ -129,48 +130,37 @@ static int registry_string(const char *key, const char *value, char *out, DWORD 
            == ERROR_SUCCESS;
 }
 
-/* No signed-in account reported: use the most recently written profile of any account. */
-static int newest_profile(const char *steam, char *out, size_t size)
-{
-    char pattern[MAX_PATH + 16], path[MAX_PATH * 2];
-    WIN32_FIND_DATAA entry;
-    WIN32_FILE_ATTRIBUTE_DATA info;
-    FILETIME newest = {0, 0};
-    HANDLE search;
-    int found = 0;
-
-    snprintf(pattern, sizeof pattern, "%s/userdata/*", steam);
-    search = FindFirstFileA(pattern, &entry);
-    if (search == INVALID_HANDLE_VALUE)
-        return 0;
-    do {
-        snprintf(path, sizeof path, "%s/userdata/%s/108710/remote/config", steam, entry.cFileName);
-        if (GetFileAttributesExA(path, GetFileExInfoStandard, &info)
-            && CompareFileTime(&info.ftLastWriteTime, &newest) > 0) {
-            newest = info.ftLastWriteTime;
-            snprintf(out, size, "%s", path);
-            found = 1;
-        }
-    } while (FindNextFileA(search, &entry));
-    FindClose(search);
-    return found;
-}
-
-/* <Steam>\userdata\<signed-in account>\108710\remote\config */
+/* <Steam>\userdata\<account>\108710\remote\config, see steam.c */
 static int profile_path(char *out, size_t size)
 {
-    char steam[MAX_PATH];
+    static char cached[MAX_PATH * 4], reported;
+    char steam[MAX_PATH] = "", game[MAX_PATH], report[4096];
+    struct steam_hints hints;
     DWORD user = 0, bytes = sizeof user;
 
     /* for testing and unusual setups */
     if (GetEnvironmentVariableA("ALANWAKE_COLLECTIBLES_PROFILE", out, (DWORD)size))
         return 1;
+    if (cached[0] && GetFileAttributesA(cached) != INVALID_FILE_ATTRIBUTES) {
+        snprintf(out, size, "%s", cached);
+        return 1;
+    }
     if (!registry_string("Software\\Valve\\Steam", "SteamPath", steam, sizeof steam))
-        return 0;
+        steam[0] = '\0';
     if (RegGetValueA(HKEY_CURRENT_USER, "Software\\Valve\\Steam\\ActiveProcess", "ActiveUser",
-                     RRF_RT_REG_DWORD, NULL, &user, &bytes) != ERROR_SUCCESS || !user)
-        return newest_profile(steam, out, size);
-    snprintf(out, size, "%s/userdata/%lu/108710/remote/config", steam, (unsigned long)user);
+                     RRF_RT_REG_DWORD, NULL, &user, &bytes) != ERROR_SUCCESS)
+        user = 0;
+    module_dir(game, sizeof game);
+    hints.registry_path = steam;
+    hints.active_user = user;
+    hints.game_dir = game;
+    if (!steam_find_profile(&hints, out, size, report, sizeof report)) {
+        if (!reported++)
+            logf_("no profile found (account %lu); looked for userdata in:\n%s",
+                  (unsigned long)user, report);
+        return 0;
+    }
+    snprintf(cached, sizeof cached, "%s", out);
     return 1;
 }
 
