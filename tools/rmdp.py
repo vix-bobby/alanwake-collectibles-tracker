@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# See LICENSE.GPL-3.0 in this folder.
 """List or selectively extract files from Alan Wake RMDP v2 archives (read-only on input).
 
 Format knowledge from AWTools' unrmdp.py (https://github.com/Nostritius/AWTools).

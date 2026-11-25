@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# See LICENSE.GPL-3.0 in this folder.
 """Unpack an Alan Wake resource bundle (*.bin with u32 count, name/size table, zlib data).
 
 Format knowledge from AWTools' unbin.py (https://github.com/Nostritius/AWTools).

@@ -53,3 +53,7 @@ does not use the network. As with any DLL of this kind, an antivirus may flag it
 TESTED
 Steam version only, on Windows and on Linux (Steam Deck). The small menu text was aligned
 at 2560x1440; if it looks off line on your screen, menu_small_text=0 avoids that.
+
+LICENCE
+MIT, copyright vix-bobby: you may share and adapt this mod. See
+AlanWakeCollectibles-LICENSE.txt.

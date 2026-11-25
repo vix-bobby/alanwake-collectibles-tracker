@@ -36,6 +36,8 @@ The mod stays loaded once loaded: the game probes Direct3D, calls `FreeLibrary`,
 it again, and hooks pointing into an unloaded DLL crashed it at launch (fixed in 0.5.1). Any
 other loader file name would need the same.
 
+Licence: MIT (`../LICENSE`). Include that file when sharing the DLL or the source.
+
 Build (Linux or WSL): `./build.sh` (needs `g++-mingw-w64-i686`). `./build.sh test` also runs
 the tests and needs WSL, because some are Windows programs. After the collectible catalog
 changes: `python3 -I gen_catalog.py <report.json>` (needs the game installed). Release zip:

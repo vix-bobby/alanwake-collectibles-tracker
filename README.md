@@ -49,3 +49,11 @@ usual Steam location seen from WSL).
 - Optional reference for the archive formats:
   `git clone https://github.com/Nostritius/AWTools vendor/AWTools` (GPL-3.0).
   `tools/rmdp.py` and `tools/unbin.py` follow the formats described by its code.
+
+## Licence
+
+[MIT](LICENSE), copyright vix-bobby, except `tools/rmdp.py` and `tools/unbin.py`, which follow
+the formats as implemented by [AWTools](https://github.com/Nostritius/AWTools) and are under
+[GPL-3.0 or later](tools/LICENSE.GPL-3.0). The other scripts that import them are MIT, but a
+copy distributed together with those two files is subject to the GPL as a whole. The mod's
+`d3d9.dll` and C source contain none of that code.
