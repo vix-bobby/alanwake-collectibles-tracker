@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Generate src/catalog.h from the JSON written by tools/collectibles.py --json."""
+"""Generate src/catalog.h from the JSON written by tools/collectibles.py --json, and
+src/radar_targets.h (the objects marked on the radar) from the game data."""
 import collections
 import json
 import re
@@ -27,7 +28,10 @@ HINTS = {
 ORDER = {"DLC1_CARDBOARDCUTOUTS": [6, 3, 2, 4, 5, 1]}
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from collectibles import DEFAULT_DATA, Archives, episodes, string_table  # noqa: E402
+from collectibles import (DEFAULT_DATA, PAGES, Archives, Dp, categories, episodes,  # noqa: E402
+                          gid_names, manuscript_pages, script_calls, script_records,
+                          string_table)
+from unbin import read_bundle  # noqa: E402
 
 game = Archives(DEFAULT_DATA)
 strings = string_table(game, "en")
@@ -77,3 +81,122 @@ for level, ((episode, _), title, chapter) in sorted(names.items(), key=lambda n:
 lines.append("};")
 (Path(__file__).parent / "src" / "catalog.h").write_text("\n".join(lines) + "\n")
 print(len(rows), "items")
+
+# ---------------------------------------------------------------- radar targets
+#
+# For each item: the object to put on the radar, and objects whose state says whether the item
+# can be picked up now. Classes (GID class numbers, from the cid_*.bin each is stored in):
+WAYPOINT, MESH, TRIGGER, PREFAB = 113, 100, 85, 90  # Waypoint, DynamicObject, Trigger, root
+# the item's own mesh, by category (others have none that is the item itself)
+MESH_NAMES = {"THERMOS": "thermos", "MANUSCRIPTPAGES": "Note", "CANPYRAMIDS": "beercan",
+              "DLC1_ALARMCLOCKS": "AlarmClock", "DLC1_CARDBOARDCUTOUTS": "cutouts_",
+              "DLC2_NIGHTSPRINGSVIDEOGAMES": "night_springs", "TVSHOWS": "tv"}
+BROAD = 24  # a "root" with more objects than this is a group of unrelated things
+
+
+def awarding_scripts():
+    """{(category, number): {(class, id) of each script that awards it}}"""
+    cats, cat_strings = categories(game)
+    pages = manuscript_pages(game, cat_strings)
+    names = gid_names(game)
+    found = collections.defaultdict(set)
+    bundle = re.compile(r"worlds/[^/]+/(episodes|levels)/[^/]+/[^/]+\.bin$")
+    for path in sorted(game.files):
+        if not bundle.match(path) or Path(path).name.startswith("cid_"):
+            continue
+        b = read_bundle(game.read(path))
+        if "dp_bytecode.bin" not in b or len(b["dp_bytecode.bin"]) < 28:
+            continue
+        code, params = Dp(b["dp_bytecode.bin"]), Dp(b["dp_bytecodeparameters.bin"])
+        for script, method, args in script_calls(code, params, script_records(b, code, names)):
+            if method == "UnlockCollectible":
+                for first, second in zip(args, args[1:]):
+                    if first[0] == "gid" and first[1][0] == 0x35:
+                        found[cats[first[1][1]][0], second[1]].add(script)
+                        break
+            elif method == "AddNoteToInventory":
+                gids = [a[1][1] for a in args if a[0] == "gid" and a[1][0] == 0x23]
+                if gids:
+                    found[PAGES, pages[gids[0]][0]].add(script)
+    return found, names
+
+
+def targets_of(category, script, names, by_level):
+    """(position object, mesh that must be shown, trigger that must be enabled) for a script,
+    each a (class, id, name) or None."""
+    cls, name = script[0], names[script]
+    if cls == PREFAB:
+        root = name
+    elif "::prefab" in name:
+        root = name.split("::prefab")[0]
+    else:
+        root = name.rsplit("::", 1)[0]
+    level = name.split("::")[0]
+    objects = [o for o in by_level[level] if o[2] == root or o[2].startswith(root + "::")]
+    broad = len(objects) > BROAD
+    trigger = (cls, script[1], name) if cls == TRIGGER else None
+    mesh = waypoint = None
+    if not broad:
+        key = MESH_NAMES.get(category)
+        # matched on the object's own name, or the root's for a mesh that is the root
+        meshes = [o for o in objects if o[0] == MESH and key
+                  and key in (o[2][len(root):] or root.rsplit("::", 1)[-1])]
+        mesh = meshes[0] if meshes else None
+        waypoints = [o for o in objects if o[0] == WAYPOINT and o[2].endswith("::Player_Waypoint")]
+        waypoint = waypoints[0] if waypoints else None
+        if not trigger and not mesh and not waypoint:
+            # the root's own interface, not that of something inside it
+            public = sorted((o for o in objects
+                             if o[0] == TRIGGER and o[2].endswith("::PublicInterface")),
+                            key=lambda o: len(o[2]))
+            position = public[0] if public else None
+            return position, None, None
+    return waypoint or mesh or trigger, mesh, trigger
+
+
+def radar_targets(path):
+    found, names = awarding_scripts()
+    by_level = collections.defaultdict(list)
+    for (cls, gid), name in names.items():
+        by_level[name.split("::")[0]].append((cls, gid, name))
+    targets, unmarked = {}, []
+    nightmare = {r["number"] for r in json.loads(Path(sys.argv[1]).read_text())
+                 if r["category"] == "MANUSCRIPTPAGES" and r["nightmare"]}
+    for (category, number), scripts in sorted(found.items()):
+        if category not in CATEGORIES:
+            continue
+        marked = False
+        for script in sorted(scripts):
+            position, mesh, trigger = targets_of(category, script, names, by_level)
+            if not position:
+                continue
+            key = position[:2]
+            entry = targets.setdefault(key, {"position": position, "mesh": mesh,
+                                             "trigger": trigger, "items": []})
+            item = (CATEGORIES.index(category), number,
+                    int(category == "MANUSCRIPTPAGES" and number in nightmare))
+            if item not in entry["items"]:
+                entry["items"].append(item)
+            marked = True
+        if not marked:
+            unmarked.append((category, number, [names[s] for s in sorted(scripts)]))
+    out = ["/* Generated by gen_catalog.py: the object marked on the radar for each collectible,",
+           " * and the objects that tell whether it can be picked up now. Do not edit. */",
+           "static const struct radar_target RADAR_TARGETS[] = {"]
+    for key, t in sorted(targets.items(), key=lambda kv: kv[1]["position"][2]):
+        if len(t["items"]) > 4:
+            raise SystemExit(f"too many items on {t['position'][2]}")
+        items = ", ".join(f"{{{c}, {n}, {h}}}" for c, n, h in t["items"])
+        mesh = f"0x{t['mesh'][1]:08X}" if t["mesh"] else "0"
+        trigger = f"0x{t['trigger'][1]:08X}" if t["trigger"] else "0"
+        level = int(re.match(r"#level_(\d+)", t["position"][2])[1])
+        out.append(f"    {{{key[0]}, 0x{key[1]:08X}, {mesh}, {trigger}, {level}, {len(t['items'])}, "
+                   f"{{{items}}}}}, /* {t['position'][2][:90]} */")
+    out.append("};")
+    Path(path).write_text("\n".join(out) + "\n")
+    print(len(targets), "radar targets;", len(unmarked), "items without one:")
+    for category, number, scripts in unmarked:
+        print(f"  {category} #{number}: {' | '.join(scripts)}")
+
+
+radar_targets(Path(__file__).parent / "src" / "radar_targets.h")

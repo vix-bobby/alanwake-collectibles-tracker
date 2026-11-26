@@ -3,13 +3,14 @@
 For the **original Alan Wake (2010) on PC, not Alan Wake Remastered**. Tested only with the
 Steam version, on Windows and on Linux (Steam Deck).
 
-- `mod/`: an in-game mod showing which collectibles are left, per chapter and episode.
-  See [mod/README.md](mod/README.md).
+- `mod/`: an in-game mod showing which collectibles are left, per chapter and episode, and
+  optionally marking the nearest one on the game's radar. See [mod/README.md](mod/README.md).
 - `tools/`: a script listing every collectible you are missing, from your profile file.
+- `docs/`: [how the game works](docs/README.md): its data, profile, program and radar.
 
 Both only read the game's files and your profile. No game files are included; the mod's item
 list holds a few short names taken from the game (episodes, chapters, manuscript page titles,
-cardboard cutouts).
+cardboard cutouts), and the radar markers use the game's object numbers for the items.
 
 ## Which collectibles am I missing?
 
@@ -28,24 +29,14 @@ usual Steam location seen from WSL).
 
 ## How the game tracks collectibles
 
-- **Profile** `config`: per category, a list of found item numbers. `savegame.aws` is only the
-  current checkpoint; its first bytes name the level.
-- **Categories and totals:** `global/cid_collectible.bin`; names resolve in `global/dp_global.bin`.
-- **Items:** each level bundle (`worlds/*/{episodes,levels}/*/*.bin`) holds script objects
-  (`cid_*script.bin`: id, instruction count, code ref, member values) and bytecode
-  (`dp_bytecode.bin`). Pickup scripts call `game:UnlockCollectible(category, number)`; the
-  number is a constant or a member value of the object.
-- **Episodes:** `globaldb/menu.xml` maps `level_NN` to episodes.
-- Thermos numbers run 1 to 101 with no 90, for 100 thermoses.
-- **Manuscript pages:** `global/cid_notebook_page.bin` gives 106 pages (numbers 0 to 105) with
-  a Nightmare-only flag (15 pages). Scripts hand them out with `AddNoteToInventory(page)`.
-  `config` holds two lists of found page numbers just before the collectible block. What
-  distinguishes them is unknown; both the script and the mod count a page found in either.
+The profile file `config` lists the numbers of the items found, per category; which items exist
+comes from the game's data. Details: [docs/game-data.md](docs/game-data.md) and
+[docs/profile.md](docs/profile.md).
 
 ## Regenerating what is not in the repository
 
 - Reports and your own files: `reports/` and `samples/`, as above.
-- The mod's item list `mod/src/catalog.h`:
+- The mod's item list `mod/src/catalog.h` and radar objects `mod/src/radar_targets.h`:
   `python3 -I mod/gen_catalog.py reports/collectibles.json`
 - Test fixtures: `python3 -I mod/test/make_fixtures.py`
 - Optional reference for the archive formats:

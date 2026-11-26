@@ -1,11 +1,7 @@
 /*
- * TEST BUILD ONLY. A marker on the game's radar for the nearest missing collectible, through
- * the game's own AddMapEntity code. Off unless [test] radar_test=1 or 2 in the ini.
- *
- *   stage 1  hooks installed, nothing added: logs threads, objects, positions, distances, the
- *            item that would be marked, and every save
- *   stage 2  as stage 1, and while the radar_markers option is on (F4) marks the nearest loaded
- *            missing item, once a save has shown the guard works
+ * A marker on the game's radar for the nearest missing collectible, through the game's own
+ * AddMapEntity code. Markers are shown while the radar_markers option is on (F4); with
+ * radar_hooks=0 nothing below is installed.
  *
  * Two places in the game are changed, both only after their code was checked byte for byte:
  *
@@ -20,6 +16,10 @@
  *       "RADAR SAVE GUARD SKIPPED", removes our marker and adds no more.
  *
  * If either change cannot be made, neither is: no marker can exist without the guard.
+ *
+ * Where an object is, and whether it is hidden (a mesh) or switched off (a trigger), is read
+ * from memory for the object types below, whose layout was taken from the game's code; for
+ * other types the game's own methods are called, as the radar itself does each frame.
  * Addresses: Steam build of AlanWake.exe dated 2020-05-15 (no ASLR); see docs/radar.md.
  */
 #define WIN32_LEAN_AND_MEAN
@@ -39,22 +39,51 @@ struct vec3 {
     float x, y, z;
 };
 
+struct radar_item {
+    unsigned char category, number, nightmare;
+};
+
+/* an object to mark, and the items it stands for (radios and TVs can carry several shows) */
+struct radar_target {
+    unsigned cls, id;
+    unsigned mesh;    /* class 100 object that must not be hidden, 0 = none */
+    unsigned trigger; /* class 85 trigger that must be switched on, 0 = none */
+    unsigned short level;
+    unsigned char count;
+    struct radar_item items[4];
+};
+
+#include "radar_targets.h"
+#define TARGET_COUNT ((int)(sizeof RADAR_TARGETS / sizeof *RADAR_TARGETS))
+
+#define CLASS_MESH 100
+#define CLASS_TRIGGER 85
+
 /* a radar entry, 0xe0 bytes */
 #define ENTRY_SIZE 0xe0
 #define ENTRY_GID 0x04
 #define ENTRY_POSITION 0x30 /* the object's world transform is copied to +0xc each frame */
-#define ENTRY_FADE 0xd0
-#define ENTRY_ACTIVE 0xd4
+#define ENTRY_ACTIVE 0xd4   /* 0 once removed: the entry fades out */
 #define RADAR_ENTRIES 0x00
 #define RADAR_COUNT 0x04
 #define MAX_ENTRIES 64 /* more would mean the layout is not what we think */
 
-/* the radar is centred on the active camera: camera + 0x4dc is its transform, + 0x24 in it the
- * position (0x43b300 returns camera + 0x500) */
-#define CAMERA_STATE ((const int *)0x6c0894)
+/* the radar is centred on the active camera: its transform at + 0x4dc, position + 0x24 */
 #define CAMERA_POSITION 0x500
-/* an object's transform: position at + 0x24 */
+/* a transform: position at + 0x24 */
 #define TRANSFORM_POSITION 0x24
+
+/* What GlobalIDMap::getPointer gives for an object is its script; method 7 of the script
+ * returns the object (0x573740: [+0xc], 0x578140: [+0x10]), whose method 1 returns its
+ * transform. */
+#define SCRIPT_MESH 0x64ba94     /* DynamicObjectScript: Hide sets bit 0 of +0x28 (0x570b73) */
+#define SCRIPT_TRIGGER 0x64c070  /* TriggerScript: EnableTrigger stores +0x18 (0x573a67) */
+#define SCRIPT_WAYPOINT 0x64c180 /* WaypointScript */
+#define MESH_HIDDEN 0x28
+#define TRIGGER_ENABLED 0x18
+#define OBJECT_MESH 0x639e4c     /* DynamicObject: transform at + 0x70 (0x44e770) */
+#define OBJECT_TRIGGER 0x6466a4  /* Trigger: transform at + 0x40 (0x5680d0) */
+#define OBJECT_WAYPOINT 0x6470bc /* Waypoint: transform at [+ 0x28] + 0x10 (0x544c90) */
 
 #define SPRITE 0 /* yellow dot; 0 also keeps the game from playing its marker sounds */
 /* Move the marker only to an item clearly nearer: by a fifth and by at least 5 m. */
@@ -77,6 +106,9 @@ static struct {
     void **radar; /* Radar* */
     const int *camera_state;
     void **cameras[8]; /* the camera global for each state, as in 0x43eb60 */
+    void **difficulty; /* object whose first int is 0 normal, 1 hard, 2 nightmare */
+    const void *script_mesh, *script_trigger, *script_waypoint;
+    const void *object_mesh, *object_trigger, *object_waypoint;
     update_fn update;
     add_fn add;
     remove_fn remove;
@@ -85,42 +117,14 @@ static struct {
     map_pointer_fn map_pointer;
 } game;
 
-/* The missing level_100 items to try. An item can have two objects: the Player_Waypoint
- * (class 113, the kind the game's own objective markers use) is preferred to the mesh
- * (class 100). */
-static const struct candidate {
-    struct gid gid;
-    int category, number;
-    const char *name;
-} CANDIDATES[] = {
-    {{113, 0x7F351912}, CAT_CUTOUTS, 5, "cutout #5 (tor) waypoint"},
-    {{100, 0x105E969B}, CAT_CUTOUTS, 5, "cutout #5 (tor) mesh"},
-    {{100, 0xECFA79C2}, CAT_ALARMCLOCKS, 4, "alarm clock #4"},
-    {{100, 0x7C50B87D}, CAT_ALARMCLOCKS, 5, "alarm clock #5"},
-    {{100, 0x4D43D75A}, CAT_ALARMCLOCKS, 6, "alarm clock #6"},
-    {{100, 0x92D6EDF3}, CAT_ALARMCLOCKS, 7, "alarm clock #7"},
-    {{100, 0xD31605F5}, CAT_ALARMCLOCKS, 8, "alarm clock #8"},
-    {{100, 0x5A9D3DDC}, CAT_ALARMCLOCKS, 9, "alarm clock #9"},
-    {{100, 0x1AC35D76}, CAT_ALARMCLOCKS, 10, "alarm clock #10"},
-    {{113, 0xF6251960}, CAT_CUTOUTS, 4, "cutout #4 (weaver) waypoint"},
-    {{100, 0xAC8FC8F4}, CAT_CUTOUTS, 4, "cutout #4 (weaver) mesh"},
-    {{113, 0x1A199A50}, CAT_CUTOUTS, 6, "cutout #6 (odin) waypoint"},
-    {{100, 0x23351242}, CAT_CUTOUTS, 6, "cutout #6 (odin) mesh"},
-    {{113, 0x4E8F5547}, CAT_CUTOUTS, 1, "cutout #1 (alice) waypoint"},
-    {{100, 0x8C07C44F}, CAT_CUTOUTS, 1, "cutout #1 (alice) mesh"},
-};
-#define CANDIDATE_COUNT ((int)(sizeof CANDIDATES / sizeof *CANDIDATES))
-
 static struct radar_host host;
-static int stage;
+static int installed;
 static DWORD hud_thread;   /* where HUDMode::update runs */
-static int guard_confirmed; /* a save went through the guard on hud_thread */
+static int guard_confirmed; /* a save went through the guard on hud_thread (logged once) */
 static int stopped;         /* something was not as expected: add nothing more */
-static int marker = -1;     /* candidate we added, or -1 */
-static signed char loaded[CANDIDATE_COUNT]; /* last lookup: -1 not tried, 0 no, 1 yes */
-static void *last_hud, *last_radar;
-static int last_count = -1, last_nearest = -2, last_camera = -1;
-static unsigned ticks;
+static int marker = -1;     /* target we added, or -1 */
+static void *last_radar;
+static int last_difficulty = -2;
 
 static int peek(const void *address, void *out, size_t size)
 {
@@ -134,26 +138,53 @@ static int same(const struct gid *a, const struct gid *b)
     return a->cls == b->cls && a->id == b->id;
 }
 
-static int same_item(int a, int b)
+static const struct gid *gid_of(int t)
 {
-    return CANDIDATES[a].category == CANDIDATES[b].category
-           && CANDIDATES[a].number == CANDIDATES[b].number;
+    return (const struct gid *)&RADAR_TARGETS[t].cls;
+}
+
+static int is_target(const struct gid *g)
+{
+    int t;
+
+    for (t = 0; t < TARGET_COUNT; t++)
+        if (same(g, gid_of(t)))
+            return 1;
+    return 0;
+}
+
+/* "Coffee thermoses 12, level 4" (the first item it stands for) */
+static const char *name_of(int t, char *out, size_t size)
+{
+    const struct radar_target *r = &RADAR_TARGETS[t];
+
+    snprintf(out, size, "%s %d, level %d", CATEGORIES[r->items[0].category].label,
+             r->items[0].number, r->level);
+    return out;
 }
 
 static void stop(const char *why)
 {
     if (!stopped)
-        host.log("radar: stopped, no more markers: %s", why);
+        host.log("radar: markers stopped: %s", why);
     stopped = 1;
 }
 
+/* Log a problem once per kind. */
+#define ONCE(...)                  \
+    do {                           \
+        static int done_;          \
+        if (!done_++)              \
+            host.log(__VA_ARGS__); \
+    } while (0)
+
 /* The radar's entries: returns the count, or -1 if they cannot be read. With `ours`, also
- * counts the entries holding one of our candidates; with `gid`, sets *has to whether it is
+ * counts the entries holding one of our targets; with `gid`, sets *has to whether it is
  * there and *entry to its address. */
 static int entries(const char *radar, int *ours, const struct gid *gid, int *has, char **entry)
 {
     char *base = NULL;
-    int count = 0, i, j;
+    int count = 0, i;
 
     if (ours)
         *ours = 0;
@@ -172,11 +203,8 @@ static int entries(const char *radar, int *ours, const struct gid *gid, int *has
             if (entry)
                 *entry = base + i * ENTRY_SIZE;
         }
-        for (j = 0; ours && j < CANDIDATE_COUNT; j++)
-            if (same(&g, &CANDIDATES[j].gid)) {
-                ++*ours;
-                break;
-            }
+        if (ours && is_target(&g))
+            ++*ours;
     }
     return count;
 }
@@ -189,12 +217,13 @@ static int has_entry(const char *radar, const struct gid *gid)
     return has;
 }
 
-/* Is the object loaded? The game's AddMapEntity crashes on an object that is not. */
-static void *lookup(const struct gid *gid)
+/* The object's script, if it is loaded. The game's AddMapEntity crashes on one that is not. */
+static void *lookup(unsigned cls, unsigned id)
 {
+    struct gid gid = {cls, id};
     void *map = game.map_instance();
 
-    return map ? game.map_pointer(map, gid) : NULL;
+    return map ? game.map_pointer(map, &gid) : NULL;
 }
 
 static int plausible(const struct vec3 *v)
@@ -214,16 +243,103 @@ static void *call_virtual(void *object, int slot)
     return ((getter_fn)method)(object);
 }
 
-/* Where a loaded object is: what the radar itself does with it each frame (0x432990 takes
- * slot 7 of the registered object, 0x585bb0 slot 1 of the result for its transform). */
-static int object_position(const struct gid *gid, struct vec3 *out)
+/* Where a loaded object is. */
+static int position_of(void *script, struct vec3 *out)
 {
-    void *registered = lookup(gid), *object, *transform;
+    const void *table = NULL;
+    char *object = NULL, *transform = NULL;
 
-    if (!registered || !(object = call_virtual(registered, 7))
-        || !(transform = call_virtual(object, 1)))
+    if (!peek(script, &table, 4))
         return 0;
-    return peek((char *)transform + TRANSFORM_POSITION, out, sizeof *out) && plausible(out);
+    if (table == game.script_mesh || table == game.script_waypoint)
+        peek((char *)script + 0xc, &object, 4);
+    else if (table == game.script_trigger)
+        peek((char *)script + 0x10, &object, 4);
+    else {
+        ONCE("radar: object script of an unexpected type (%p): asking the game", table);
+        object = call_virtual(script, 7);
+    }
+    if (!object || !peek(object, &table, 4))
+        return 0;
+    if (table == game.object_mesh)
+        transform = object + 0x70;
+    else if (table == game.object_trigger)
+        transform = object + 0x40;
+    else if (table == game.object_waypoint) {
+        if (!peek(object + 0x28, &transform, 4) || !transform)
+            return 0;
+        transform += 0x10;
+    } else {
+        ONCE("radar: object of an unexpected type (%p): asking the game", table);
+        transform = call_virtual(object, 1);
+    }
+    return transform && peek(transform + TRANSFORM_POSITION, out, sizeof *out) && plausible(out);
+}
+
+/* Why the item cannot be picked up now (its mesh hidden, its trigger switched off), or NULL.
+ * What cannot be told counts as available. */
+static const char *unavailable(const struct radar_target *r)
+{
+    const void *table = NULL;
+    void *script;
+    unsigned flags = 0;
+    unsigned char enabled = 1;
+
+    if (r->mesh) {
+        if (!(script = lookup(CLASS_MESH, r->mesh)) || !peek(script, &table, 4))
+            return "mesh not loaded";
+        if (table == game.script_mesh && peek((char *)script + MESH_HIDDEN, &flags, 4)
+            && (flags & 1))
+            return "mesh hidden";
+    }
+    if (r->trigger) {
+        if (!(script = lookup(CLASS_TRIGGER, r->trigger)) || !peek(script, &table, 4))
+            return "trigger not loaded";
+        if (table == game.script_trigger
+            && peek((char *)script + TRIGGER_ENABLED, &enabled, 1) && !enabled)
+            return "trigger switched off";
+    }
+    return NULL;
+}
+
+static int available(const struct radar_target *r)
+{
+    return unavailable(r) == NULL;
+}
+
+/* Entries of ours that are shown but are not the marker (one a save kept despite a skipped
+ * guard, say): taken away. They fade, then the game erases them. */
+static void remove_strays(char *radar)
+{
+    char *base = NULL;
+    int count = 0, i;
+
+    if (!peek(radar + RADAR_ENTRIES, &base, 4) || !peek(radar + RADAR_COUNT, &count, 4)
+        || count < 0 || count > MAX_ENTRIES)
+        return;
+    for (i = 0; i < count; i++) {
+        struct gid g;
+        unsigned char active = 0;
+
+        if (peek(base + i * ENTRY_SIZE + ENTRY_GID, &g, sizeof g)
+            && peek(base + i * ENTRY_SIZE + ENTRY_ACTIVE, &active, 1) && active
+            && is_target(&g) && (marker < 0 || !same(&g, gid_of(marker)))) {
+            game.remove(radar, &g);
+            host.log("radar: an unexpected marker of ours removed");
+        }
+    }
+}
+
+/* Is any item of the target still to find, on this difficulty? */
+static int wanted(const struct radar_target *r, const struct profile *p, int nightmare)
+{
+    int i;
+
+    for (i = 0; i < r->count && i < 4; i++)
+        if (!p->found[r->items[i].category][r->items[i].number]
+            && (!r->items[i].nightmare || nightmare))
+            return 1;
+    return 0;
 }
 
 /* The radar's centre: the active camera, chosen as 0x43eb60 does, read without calling it. */
@@ -238,50 +354,44 @@ static int camera_position(struct vec3 *out)
     return peek(camera + CAMERA_POSITION, out, sizeof *out) && plausible(out);
 }
 
-/* the radar is flat: distance on the ground */
-static float distance(const struct vec3 *a, const struct vec3 *b)
+/* 0 normal, 1 hard, 2 nightmare, -1 unknown */
+static int difficulty(void)
 {
-    float x = a->x - b->x, z = a->z - b->z;
-    return sqrtf(x * x + z * z);
+    char *system = NULL;
+    int level = -1;
+
+    if (!peek(game.difficulty, &system, 4) || !system || !peek(system, &level, 4) || level < 0
+        || level > 2)
+        return -1;
+    return level;
 }
 
-static void log_marker(const char *radar, const struct vec3 *camera)
+static float distance(const struct vec3 *a, const struct vec3 *b)
 {
-    struct vec3 at = {0, 0, 0};
-    unsigned char active = 0;
-    float fade = 0;
-    char *entry = NULL;
-    int has = 0, count = entries(radar, NULL, &CANDIDATES[marker].gid, &has, &entry);
-
-    if (has) {
-        peek(entry + ENTRY_POSITION, &at, sizeof at);
-        peek(entry + ENTRY_ACTIVE, &active, 1);
-        peek(entry + ENTRY_FADE, &fade, 4);
-    }
-    host.log("radar: %d entries; marker on %s: %s, active %d, fade %.2f, at %.1f %.1f %.1f, "
-             "%.1f m away",
-             count, CANDIDATES[marker].name, has ? "present" : "absent", active, fade, at.x, at.y,
-             at.z, camera ? distance(camera, &at) : -1.0f);
+    float x = a->x - b->x, y = a->y - b->y, z = a->z - b->z;
+    return sqrtf(x * x + y * y + z * z);
 }
 
 static void remove_marker(char *radar, const char *why)
 {
-    if (has_entry(radar, &CANDIDATES[marker].gid))
-        game.remove(radar, &CANDIDATES[marker].gid); /* it fades, then the game erases it */
-    host.log("radar: marker on %s removed: %s", CANDIDATES[marker].name, why);
+    char name[80];
+
+    if (has_entry(radar, gid_of(marker)))
+        game.remove(radar, gid_of(marker)); /* it fades, then the game erases it */
+    host.log("radar: marker on %s removed: %s", name_of(marker, name, sizeof name), why);
     marker = -1;
 }
 
-static int add_marker(void *hud, char *radar, int i)
+static int add_marker(void *hud, char *radar, int t)
 {
-    if (!lookup(&CANDIDATES[i].gid)) /* checked again right before the call */
+    if (!lookup(RADAR_TARGETS[t].cls, RADAR_TARGETS[t].id)) /* right before the call */
         return 0;
-    game.add(hud, &CANDIDATES[i].gid, SPRITE, NULL, 0, 0);
-    if (!has_entry(radar, &CANDIDATES[i].gid)) {
+    game.add(hud, gid_of(t), SPRITE, NULL, 0, 0);
+    if (!has_entry(radar, gid_of(t))) {
         stop("the marker did not appear in the radar");
         return 0;
     }
-    marker = i;
+    marker = t;
     return 1;
 }
 
@@ -289,147 +399,97 @@ static int add_marker(void *hud, char *radar, int i)
 static void tick(void)
 {
     struct profile profile;
-    struct vec3 camera, where[CANDIDATE_COUNT];
-    float away[CANDIDATE_COUNT];
+    struct vec3 camera, where;
     void *hud = *game.hud, *radar = *game.radar;
-    int have_profile, markers = 0, count, have_camera, nearest = -1, i, j;
+    int markers = 0, have_profile, nightmare, nearest = -1, t;
+    float best = 0;
+    char name[80], other[80];
 
-    if (!ticks++)
-        memset(loaded, -1, sizeof loaded);
-    if (hud != last_hud || radar != last_radar) {
-        host.log("radar: HUD %p, radar %p", hud, radar);
-        last_hud = hud;
+    if (radar != last_radar) {
+        marker = -1; /* a new radar (or none, in menus) holds nothing of ours */
         last_radar = radar;
     }
     if (!hud || !radar)
         return;
-    count = entries(radar, NULL, NULL, NULL, NULL);
-    if (count != last_count) {
-        host.log("radar: %d entries", count);
-        last_count = count;
-    }
-    if (count < 0) {
+    if (entries(radar, NULL, NULL, NULL, NULL) < 0) {
         stop("radar entries not as expected");
         return;
     }
     have_profile = host.state(&profile, &markers);
 
-    /* the marker we put there */
     if (marker >= 0) {
-        const struct candidate *c = &CANDIDATES[marker];
+        const struct radar_target *r = &RADAR_TARGETS[marker];
 
         if (stopped)
             remove_marker(radar, "stopped");
-        else if (!has_entry(radar, &c->gid)) {
-            host.log("radar: marker on %s gone (object unloaded, or level reloaded)", c->name);
-            marker = -1;
-        } else if (have_profile && profile.found[c->category][c->number])
-            remove_marker(radar, "found");
-        else if (!markers || stage < 2)
+        else if (!has_entry(radar, gid_of(marker)))
+            marker = -1; /* the object unloaded, or the level was reloaded: chosen again */
+        else if (!markers)
             remove_marker(radar, "markers switched off");
+        else if (have_profile && !wanted(r, &profile, difficulty() == 2))
+            remove_marker(radar, "found");
+        else if (!available(r))
+            remove_marker(radar, "picked up or not available");
     }
-    if (stopped)
-        return; /* something was not as expected: no more calls into game objects either */
+    remove_strays(radar);
+    if (stopped || !markers || !have_profile || !camera_position(&camera))
+        return;
 
-    have_camera = camera_position(&camera);
-    if (have_camera != last_camera) {
-        if (have_camera)
-            host.log("radar: camera at %.1f %.1f %.1f", camera.x, camera.y, camera.z);
-        else
-            host.log("radar: no camera: nearest item not chosen");
-        last_camera = have_camera;
+    nightmare = difficulty();
+    if (nightmare != last_difficulty) {
+        host.log("radar: difficulty %s", nightmare == 2   ? "Nightmare"
+                                         : nightmare >= 0 ? "normal or hard"
+                                                          : "unknown: Nightmare-only pages left out");
+        last_difficulty = nightmare;
     }
+    nightmare = nightmare == 2;
+    for (t = 0; t < TARGET_COUNT; t++) {
+        static unsigned char told[TARGET_COUNT];
+        const struct radar_target *r = &RADAR_TARGETS[t];
+        const char *why;
+        void *script;
+        float d;
 
-    /* where each missing item is, if loaded; an item's first loaded object stands for it */
-    for (i = 0; i < CANDIDATE_COUNT; i++) {
-        const struct candidate *c = &CANDIDATES[i];
-        int is_loaded;
-
-        away[i] = -1;
-        if (!have_profile || profile.found[c->category][c->number])
+        if (!wanted(r, &profile, nightmare) || !(script = lookup(r->cls, r->id))
+            || !position_of(script, &where))
             continue;
-        is_loaded = object_position(&c->gid, &where[i]);
-        if (is_loaded != loaded[i]) {
-            if (is_loaded)
-                host.log("radar: %s (%u:%08X): loaded, at %.1f %.1f %.1f", c->name, c->gid.cls,
-                         c->gid.id, where[i].x, where[i].y, where[i].z);
-            else
-                host.log("radar: %s (%u:%08X): not loaded", c->name, c->gid.cls, c->gid.id);
+        if ((why = unavailable(r))) {
+            /* once per item and game start: says why a loaded item gets no dot */
+            if (!told[t]++)
+                host.log("radar: %s not marked: %s", name_of(t, name, sizeof name), why);
+            continue;
         }
-        loaded[i] = (signed char)is_loaded;
-        for (j = 0; j < i && is_loaded; j++)
-            if (same_item(i, j) && away[j] >= 0)
-                is_loaded = 0; /* the item already has a loaded object */
-        if (!is_loaded || !have_camera)
-            continue;
-        away[i] = distance(&camera, &where[i]);
-        if (nearest < 0 || away[i] < away[nearest])
-            nearest = i;
+        d = distance(&camera, &where);
+        if (nearest < 0 || d < best) {
+            nearest = t;
+            best = d;
+        }
     }
-    if (!have_profile) {
-        static int told;
-        if (!told++)
-            host.log("radar: no profile read yet: nothing chosen");
+    if (nearest < 0 || nearest == marker)
         return;
-    }
-    if (nearest != last_nearest && have_camera) {
-        if (nearest >= 0)
-            host.log("radar: nearest missing item: %s, %.1f m", CANDIDATES[nearest].name,
-                     away[nearest]);
-        else
-            host.log("radar: no missing item loaded");
-        last_nearest = nearest;
-    }
-    if (ticks % 10 == 0 && have_camera) {
-        char line[512];
-        int n = snprintf(line, sizeof line, "radar: camera %.1f %.1f %.1f;", camera.x, camera.y,
-                         camera.z);
-
-        for (i = 0; i < CANDIDATE_COUNT && n > 0 && n < (int)sizeof line; i++)
-            if (away[i] >= 0)
-                n += snprintf(line + n, sizeof line - n, " %s %.1f m;", CANDIDATES[i].name,
-                              away[i]);
-        host.log("%s", line);
-        if (marker >= 0)
-            log_marker(radar, &camera);
-    }
-
-    if (stage < 2 || !markers || stopped || nearest < 0)
-        return;
-    if (!guard_confirmed) {
-        static int told;
-        if (!told++)
-            host.log("radar: waiting for a save through the guard before adding a marker"
-                     " (reach a checkpoint)");
-        return;
-    }
-    if (has_entry(radar, &CANDIDATES[nearest].gid) && marker != nearest)
+    if (has_entry(radar, gid_of(nearest)))
         return; /* still fading out after an earlier removal: wait */
     if (marker < 0) {
-        if (add_marker(hud, radar, nearest)) {
-            host.log("radar: marker added on %s, %.1f m away", CANDIDATES[nearest].name,
-                     away[nearest]);
-            log_marker(radar, &camera);
-        }
+        if (add_marker(hud, radar, nearest))
+            host.log("radar: marker on %s, %.0f m away", name_of(nearest, name, sizeof name),
+                     best);
         return;
     }
-    if (!same_item(nearest, marker)) {
-        struct vec3 at;
+    {
         char *entry = NULL;
         int has = 0;
         float now;
 
-        entries(radar, NULL, &CANDIDATES[marker].gid, &has, &entry);
-        if (!has || !peek(entry + ENTRY_POSITION, &at, sizeof at) || !plausible(&at))
+        entries(radar, NULL, gid_of(marker), &has, &entry);
+        if (!has || !peek(entry + ENTRY_POSITION, &where, sizeof where) || !plausible(&where))
             return;
-        now = distance(&camera, &at);
-        if (away[nearest] < now * SWITCH_RATIO && now - away[nearest] >= SWITCH_MIN) {
-            int old = marker;
-
-            remove_marker(radar, "a nearer item is loaded");
+        now = distance(&camera, &where);
+        if (best < now * SWITCH_RATIO && now - best >= SWITCH_MIN) {
+            name_of(marker, other, sizeof other);
+            remove_marker(radar, "a nearer item is there");
             if (add_marker(hud, radar, nearest))
-                host.log("radar: marker moved from %s (%.1f m) to %s (%.1f m)",
-                         CANDIDATES[old].name, now, CANDIDATES[nearest].name, away[nearest]);
+                host.log("radar: marker moved from %s (%.0f m) to %s (%.0f m)", other, now,
+                         name_of(nearest, name, sizeof name), best);
         }
     }
 }
@@ -441,7 +501,7 @@ __attribute__((thiscall, force_align_arg_pointer)) static void my_update(void *h
 
     if (!hud_thread) {
         hud_thread = GetCurrentThreadId();
-        host.log("radar: HUD update runs on thread %lu", (unsigned long)hud_thread);
+        host.log("radar: game thread %lu", (unsigned long)hud_thread);
     }
     if (GetCurrentThreadId() == hud_thread && (!last || now - last >= 1000)) {
         last = now ? now : 1;
@@ -453,29 +513,26 @@ __attribute__((thiscall, force_align_arg_pointer)) static void my_update(void *h
 __attribute__((thiscall, force_align_arg_pointer)) static void my_save(void *radar,
                                                                      void *stream)
 {
-    static unsigned calls;
     DWORD thread = GetCurrentThreadId();
     int ours = 0, count = radar ? entries(radar, &ours, NULL, NULL, NULL) : -1;
 
-    calls++;
-    host.log("radar: save %u on thread %lu (HUD thread %lu): %d entries, %d ours", calls,
-             (unsigned long)thread, (unsigned long)hud_thread, count, ours);
     if (count == 0) {
         game.save(radar, stream); /* nothing to hide */
         if (!hud_thread)
             ; /* before the first HUD update (loading): proves nothing either way */
         else if (thread == hud_thread && !guard_confirmed) {
             guard_confirmed = 1;
-            host.log("radar: save guard confirmed: saves run on the HUD thread");
+            host.log("radar: save guard confirmed: saves run on the game thread");
         } else if (thread != hud_thread)
             stop("a save ran on another thread than the HUD");
         return;
     }
     if (count < 0 || thread != hud_thread || ours != count) {
-        host.log("RADAR SAVE GUARD SKIPPED: %s; the save may contain %d marker(s)",
+        host.log("RADAR SAVE GUARD SKIPPED: %s (thread %lu, game thread %lu, %d entries, %d "
+                 "ours); the save may contain %d marker(s)",
                  count < 0 ? "radar not readable" : thread != hud_thread ? "other thread"
                                                                          : "entries not ours",
-                 ours);
+                 (unsigned long)thread, (unsigned long)hud_thread, count, ours, ours);
         stop("save guard skipped");
         game.save(radar, stream);
         return;
@@ -487,26 +544,13 @@ __attribute__((thiscall, force_align_arg_pointer)) static void my_save(void *rad
     host.log("radar: saved without the %d marker(s)", count);
 }
 
-void radar_frame(void)
-{
-    static int done;
-
-    if (stage && hud_thread && !done++)
-        host.log("radar: frames presented on thread %lu (HUD thread %lu)",
-                 (unsigned long)GetCurrentThreadId(), (unsigned long)hud_thread);
-}
-
 const char *radar_note(void)
 {
-    if (!stage)
-        return "\nRadar test not active";
+    if (!installed)
+        return "\nNot available: see the log";
     if (stopped)
-        return "\nRadar markers stopped: see the log";
-    if (stage < 2)
-        return "\nRadar test stage 1: nothing is marked";
-    if (!guard_confirmed)
-        return "\nShown after the next checkpoint";
-    return "";
+        return "\nStopped: see the log";
+    return "\nShown on the radar, for items in the area";
 }
 
 /* ---------------------------------------------------------------- installation */
@@ -543,6 +587,30 @@ static const struct {
     {0x43ebfc, 16, {0xd1, 0xeb, 0x43, 0x00, 0xd1, 0xeb, 0x43, 0x00, 0xd7, 0xeb, 0x43, 0x00, 0xe3, 0xeb, 0x43, 0x00}},
     /* the camera position getter the AI debug view uses: camera + 0x500 */
     {0x43b300, 7, {0x8d, 0x81, 0x00, 0x05, 0x00, 0x00, 0xc3}},
+    /* difficulty: the getter, and its save writing the first int of the object */
+    {0x5af350, 6, {0xa1, 0x60, 0xb5, 0x76, 0x00, 0xc3}},
+    {0x5af4f0, 8, {0x51, 0x56, 0x8b, 0xf1, 0x8b, 0x06, 0x57, 0x8b}},
+    /* scripts' method 7 (the object) and how Hide and EnableTrigger store their state */
+    {0x573740, 4, {0x8b, 0x41, 0x0c, 0xc3}},
+    {0x578140, 4, {0x8b, 0x41, 0x10, 0xc3}},
+    {0x570b73, 4, {0x83, 0x4e, 0x28, 0x01}},
+    {0x570b79, 4, {0x83, 0x66, 0x28, 0xfe}},
+    {0x573a67, 3, {0x88, 0x46, 0x18}},
+    /* objects' method 1 (the transform) */
+    {0x44e770, 4, {0x8d, 0x41, 0x70, 0xc3}},
+    {0x5680d0, 4, {0x8d, 0x41, 0x40, 0xc3}},
+    {0x544c90, 7, {0x8b, 0x41, 0x28, 0x83, 0xc0, 0x10, 0xc3}},
+};
+
+/* method table entries relied on: address, expected value */
+static const unsigned SLOTS[][2] = {
+    {0x634eb8, 0x4327c0}, /* HUDMode::update, the one replaced */
+    {0x64ba94 + 0x1c, 0x573740}, {0x64ba94, 0x570b00}, /* DynamicObjectScript */
+    {0x64c070 + 0x1c, 0x578140}, {0x64c070, 0x573a20}, /* TriggerScript */
+    {0x64c180 + 0x1c, 0x573740},                       /* WaypointScript */
+    {0x639e4c + 4, 0x44e770},                          /* DynamicObject */
+    {0x6466a4 + 4, 0x5680d0},                          /* Trigger */
+    {0x6470bc + 4, 0x544c90},                          /* Waypoint */
 };
 #define UPDATE_SLOT ((void **)0x634eb8) /* HUDMode method table, slot 6 */
 #define SAVE_CALL 0x48355e              /* e8 <rel32> */
@@ -552,7 +620,6 @@ static const struct {
 static int expected_build(void)
 {
     unsigned char code[16];
-    void *slot = NULL;
     size_t i;
 
     if ((ULONG_PTR)GetModuleHandleA(NULL) != 0x400000)
@@ -561,7 +628,12 @@ static int expected_build(void)
         if (!peek((void *)(ULONG_PTR)EXPECTED[i].address, code, EXPECTED[i].size)
             || memcmp(code, EXPECTED[i].code, EXPECTED[i].size) != 0)
             return 0;
-    return peek(UPDATE_SLOT, &slot, 4) && slot == (void *)0x4327c0;
+    for (i = 0; i < sizeof SLOTS / sizeof *SLOTS; i++) {
+        unsigned value = 0;
+        if (!peek((void *)(ULONG_PTR)SLOTS[i][0], &value, 4) || value != SLOTS[i][1])
+            return 0;
+    }
+    return 1;
 }
 
 static int write_code(void *address, const void *data, size_t size)
@@ -576,29 +648,22 @@ static int write_code(void *address, const void *data, size_t size)
     return memcmp(address, data, size) == 0;
 }
 
-int radar_install(const struct radar_host *h, int test_stage)
+int radar_install(const struct radar_host *h)
 {
     /* the camera global for each state of 0x43eb60 (state 0 read as when called with 0) */
     static const unsigned CAMERAS[8] = {0x6c0898, 0x6c08a0, 0x6c08a0, 0x6c08a4,
                                         0x6c089c, 0x6c089c, 0x6c08a0, 0x6c08ac};
-    static int installed = -1;
+    static int tried;
     HMODULE rl;
     void *instance, *pointer, *imported[2] = {NULL, NULL};
     LONG rel;
     int i;
 
-    if (installed >= 0)
+    if (tried++)
         return installed;
-    installed = 0;
     host = *h;
-    if (test_stage < 1)
-        return 0;
-    host.log("radar test stage %d: %s", test_stage,
-             test_stage >= 2 ? "marks the nearest missing item while radar_markers is on,"
-                               " after a guarded save"
-                             : "log only, no marker");
     if (!expected_build()) {
-        host.log("radar test unavailable: this is not the supported build of AlanWake.exe");
+        host.log("radar markers unavailable: this is not the supported build of AlanWake.exe");
         return 0;
     }
     rl = GetModuleHandleA("rl_sf_Win32.dll");
@@ -608,27 +673,32 @@ int radar_install(const struct radar_host *h, int test_stage)
     peek(GIDMAP_INSTANCE_IMPORT, &imported[0], 4);
     peek(GIDMAP_POINTER_IMPORT, &imported[1], 4);
     if (!instance || !pointer || instance != imported[0] || pointer != imported[1]) {
-        host.log("radar test unavailable: object lookup functions not found");
+        host.log("radar markers unavailable: object lookup functions not found");
         return 0;
     }
     game.hud = (void **)0x6bf9c8;
     game.radar = (void **)0x6e8ce8;
-    game.camera_state = CAMERA_STATE;
+    game.camera_state = (const int *)0x6c0894;
     for (i = 0; i < 8; i++)
         game.cameras[i] = (void **)(ULONG_PTR)CAMERAS[i];
+    game.difficulty = (void **)0x76b560;
+    game.script_mesh = (void *)SCRIPT_MESH;
+    game.script_trigger = (void *)SCRIPT_TRIGGER;
+    game.script_waypoint = (void *)SCRIPT_WAYPOINT;
+    game.object_mesh = (void *)OBJECT_MESH;
+    game.object_trigger = (void *)OBJECT_TRIGGER;
+    game.object_waypoint = (void *)OBJECT_WAYPOINT;
     game.update = (update_fn)0x4327c0;
     game.add = (add_fn)0x432990;
     game.remove = (remove_fn)0x584940;
     game.save = (save_fn)0x5841e0;
     game.map_instance = (map_instance_fn)instance;
     game.map_pointer = (map_pointer_fn)pointer;
-    stage = test_stage;
 
     /* the save guard first: without it, nothing else is installed */
     rel = (LONG)((ULONG_PTR)(void *)my_save - (SAVE_CALL + 5));
     if (!write_code((void *)(SAVE_CALL + 1), &rel, 4)) {
-        host.log("radar test unavailable: the save guard could not be installed");
-        stage = 0;
+        host.log("radar markers unavailable: the save guard could not be installed");
         return 0;
     }
     {
@@ -636,12 +706,11 @@ int radar_install(const struct radar_host *h, int test_stage)
         if (!write_code(UPDATE_SLOT, &hook, 4)) {
             static const LONG original = 0x5841e0 - (SAVE_CALL + 5);
             write_code((void *)(SAVE_CALL + 1), &original, 4); /* put the save back */
-            host.log("radar test unavailable: the HUD hook could not be installed");
-            stage = 0;
+            host.log("radar markers unavailable: the HUD hook could not be installed");
             return 0;
         }
     }
     installed = 1;
-    host.log("radar test: save guard and HUD hook installed");
+    host.log("radar hooks installed (%d objects known)", TARGET_COUNT);
     return 1;
 }

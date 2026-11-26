@@ -179,12 +179,13 @@ int main(void)
         EXPECT(OPTIONS[OPT_OVERLAY].key == VK_F1 && OPTIONS[OPT_MENU_COUNTS].key == VK_F2);
         EXPECT(OPTIONS[OPT_PAGE_TITLES].key == VK_F9 && OPTIONS[OPT_MENU_DETAIL].key == 0);
         EXPECT(!OPTIONS[OPT_OVERLAY].enabled && !OPTIONS[OPT_MENU_DETAIL].enabled);
-        EXPECT(!POSITION.bottom && POSITION.right && POSITION.margin_y == 10 && RADAR_TEST == 1);
+        EXPECT(!POSITION.bottom && POSITION.right && POSITION.margin_y == 10);
         EXPECT(strstr(contents(path), "version=9.9.9") && !strstr(text, "F8"));
         EXPECT(strstr(text, "overlay=F1") && strstr(text, "menu_detail=none"));
         EXPECT(strstr(text, "overlay=0") && strstr(text, "margin_x=4"));
         EXPECT(strstr(text, "margin_y=10"));
-        EXPECT(strstr(text, "radar_test=1"));
+        EXPECT(!strstr(text, "radar_test") && !strstr(text, "[test]")); /* the test switch goes */
+        EXPECT(strstr(text, "radar_hooks=1") && strstr(text, "radar_hooks=none"));
     }
     /* any other margin of an old file is kept; with a version, so is 9 */
     {
@@ -218,18 +219,17 @@ int main(void)
     EXPECT(OPTIONS[OPT_OVERLAY].key == VK_F9 && OPTIONS[OPT_PAGE_TITLES].key == 0);
     EXPECT(strstr(contents(path), "page_titles=none"));
 
-    /* radar test stage: off unless given, never written, nonsense is off */
+    /* radar: markers off by default on F4, hooks on; a test build's switch is removed and its
+     * markers choice kept */
     remove_file(path);
-    RADAR_TEST = 7;
     load(path);
-    EXPECT(RADAR_TEST == 0 && strstr(contents(path), "\nradar_test=") == NULL);
+    EXPECT(!OPTIONS[OPT_RADAR_MARKERS].enabled && OPTIONS[OPT_RADAR_HOOKS].enabled);
+    EXPECT(OPTIONS[OPT_RADAR_HOOKS].key == 0 && strstr(contents(path), "radar_hooks=1"));
     ini_write("test", "radar_test", "2", path);
+    ini_write("options", "radar_markers", "1", path);
     load(path);
-    EXPECT(RADAR_TEST == 2);
-    EXPECT(settings_toggle(OPT_OVERLAY) && strstr(contents(path), "radar_test=2"));
-    ini_write("test", "radar_test", "3", path);
-    load(path);
-    EXPECT(RADAR_TEST == 0);
+    EXPECT(OPTIONS[OPT_RADAR_MARKERS].enabled && !strstr(contents(path), "radar_test"));
+    EXPECT(settings_toggle(OPT_RADAR_MARKERS) && strstr(contents(path), "radar_markers=0"));
 
     remove_file(path);
     printf("settings: PASS\n");

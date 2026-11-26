@@ -1,4 +1,4 @@
-/* Test build only: a marker on the game's radar for the nearest missing collectible (radar.c). */
+/* Markers on the game's radar for the nearest missing collectible (radar.c). */
 #ifndef RADAR_H
 #define RADAR_H
 
@@ -11,14 +11,11 @@ struct radar_host {
     int (*state)(struct profile *profile, int *markers);
 };
 
-/* Stage 1 installs the hooks and only logs; stage 2 may also add markers. Returns 0 if
- * nothing was installed: then nothing in the game was changed. */
-int radar_install(const struct radar_host *host, int stage);
+/* Install the radar hooks if the running program is the supported build of the game.
+ * Returns 0 if nothing was installed: then nothing in the game was changed. */
+int radar_install(const struct radar_host *host);
 
-/* Called on each presented frame: logs the frame thread once. */
-void radar_frame(void);
-
-/* Why markers may not show at the moment, as a second message line ("" if nothing to say). */
+/* A second message line for switching markers on: where they show, or why they cannot. */
 const char *radar_note(void);
 
 #endif

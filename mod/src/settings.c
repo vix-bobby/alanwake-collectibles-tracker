@@ -17,12 +17,12 @@ struct option OPTIONS[OPT_COUNT] = {
     {"page_titles", "Page titles", 0, VK_F9},
     {"item_details", "Item details", 0, VK_F10},
     {"radar_markers", "Radar markers", 0, VK_F4},
+    {"radar_hooks", "Radar changes", 1, 0},
 };
 
 /* clear of the radar and objective (top left) and above the subtitles */
 struct position POSITION = {0, 1, 1, 10};
 
-int RADAR_TEST;
 
 static wchar_t ini[PATH_WIDE];
 static char version[32]; /* of the running mod, recorded as [mod] version */
@@ -43,7 +43,7 @@ static const char TEMPLATE[] =
     "; Default keys in game:\r\n"
     ";   F1  show or hide the overlay\r\n"
     ";   F2  show or hide the counts in the episode and chapter menus\r\n"
-    ";   F4  test builds only: mark the nearest missing collectible on the radar\r\n"
+    ";   F4  mark the nearest missing collectible on the game's radar\r\n"
     ";   F7  expand the overlay with the list of what is missing, or simplify it\r\n"
     ";   F9  name manuscript pages in that list by title instead of number (spoilers)\r\n"
     ";   F10 add details to other items in that list: cutout names, where some are (spoilers)\r\n"
@@ -64,8 +64,10 @@ static const char TEMPLATE[] =
     "page_titles=0\r\n"
     "; 1 = that list adds cutout names, and where some chests and signs are (mild spoilers)\r\n"
     "item_details=0\r\n"
-    "; test builds only, with [test] radar_test=2: 1 = mark the nearest missing collectible on the radar\r\n"
+    "; 1 = a dot on the game's radar shows the nearest missing collectible in the area\r\n"
     "radar_markers=0\r\n"
+    "; 0 = never touch the game's radar (use this if the game misbehaves with the markers)\r\n"
+    "radar_hooks=1\r\n"
     "\r\n"
     "[keys]\r\n"
     "; F1 to F24, or none. F5 is the game's default manuscript key.\r\n"
@@ -77,7 +79,8 @@ static const char TEMPLATE[] =
     "overlay_expanded=F7\r\n"
     "page_titles=F9\r\n"
     "item_details=F10\r\n"
-    "radar_markers=F4\r\n" POSITION_TEMPLATE;
+    "radar_markers=F4\r\n"
+    "radar_hooks=none\r\n" POSITION_TEMPLATE;
 
 const char *key_name(int key, char out[8])
 {
@@ -228,8 +231,6 @@ static int save_all(void)
         saved &= save_option(&OPTIONS[i]);
         saved &= ini_set("keys", OPTIONS[i].name, OPTIONS[i].key ? key : "none");
     }
-    if (RADAR_TEST)
-        saved &= ini_set("test", "radar_test", RADAR_TEST == 1 ? "1" : "2");
     return saved & save_position();
 }
 
@@ -247,9 +248,8 @@ void settings_load(const char *path, const char *mod_version)
     if (!created)
         add_position_section();
     load_position();
-    RADAR_TEST = ini_number("test", "radar_test", 0);
-    if (RADAR_TEST < 0 || RADAR_TEST > 2)
-        RADAR_TEST = 0;
+    /* the switch of the radar test builds (0.9.0-radar*): markers are now an option */
+    WritePrivateProfileStringW(L"test", NULL, NULL, ini);
     for (i = 0; i < OPT_COUNT; i++) {
         struct option *o = &OPTIONS[i];
 

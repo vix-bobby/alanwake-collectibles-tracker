@@ -1,4 +1,4 @@
-Alan Wake collectibles tracker 0.8.0
+Alan Wake collectibles tracker 0.9.0
 ====================================
 
 Shows which collectibles you still have to find, per chapter and episode.
@@ -10,8 +10,8 @@ REQUIREMENTS
 - The original Alan Wake (2010) on Steam, on Windows or Linux (Steam Deck).
   Not Alan Wake Remastered.
 - GOG and Epic versions are not supported: the mod finds your profile through Steam.
-- The counts in menus need the current Steam version of AlanWake.exe (dated 2020-05-15).
-  On any other version they switch themselves off.
+- The counts in menus and the radar markers need the current Steam version of AlanWake.exe
+  (dated 2020-05-15). On any other version they switch themselves off.
 
 INSTALL
 1. Open the game folder. In Steam: right-click Alan Wake, Manage, Browse local files.
@@ -39,6 +39,19 @@ IN GAME
   of page numbers, F10 adds details to other items: who each cardboard cutout shows, and
   where some chests and signs are.
 - Episode and chapter menus: what is left to find, updated as you play. F2 shows or hides it.
+- Radar markers (off by default): F4 puts a yellow dot on the game's radar for the nearest
+  collectible you still have to find. It works with the overlay hidden (F1), so you can
+  follow the dot with nothing else on screen. Good to know:
+  - Only items the game has loaded around you count, usually the current area.
+  - Distances are measured from the camera, height included.
+  - The dot moves to another item only when that one is clearly nearer, and disappears when
+    you pick the item up.
+  - Hidden or not yet available items are skipped where the mod can tell. For chests it
+    cannot: a dot can stay on an opened chest until the game saves your profile.
+  - Nightmare-only pages get a dot only on Nightmare. Four pages handed out by a cutscene or
+    the story never get one.
+  - The dot shows only when the game shows its radar, and it is kept out of your save.
+  - F4 is ignored while Alt is held, since Alt+F4 closes the game.
 - Nightmare-only manuscript pages are counted separately.
 - The mod's text is in English, whatever the game's language.
 
@@ -60,6 +73,8 @@ that a margin_y of 9, the former default, becomes 10.
   overlay_expanded 0   List what is missing in the chapter under the counts.
   page_titles      0   Page titles instead of page numbers in that list.
   item_details     0   Cutout names, and where some chests and signs are, in that list.
+  radar_markers    0   A dot on the game's radar for the nearest missing collectible.
+  radar_hooks      1   0 leaves the game's radar completely untouched (no markers).
 
 [keys]             F1 to F24, or none
   overlay          F1
@@ -70,8 +85,10 @@ that a margin_y of 9, the former default, becomes 10.
   overlay_expanded F7
   page_titles      F9
   item_details     F10
+  radar_markers    F4
+  radar_hooks      none
 Each key switches the option of the same name and saves your choice in the file. It acts at
-once, except for menu_small_text and menu_hooks, which apply at the next start. F5 is the
+once, except for menu_small_text, menu_hooks and radar_hooks, which apply at the next start. F5 is the
 game's default manuscript key, so avoid it.
 
 [position]         where the overlay sits
@@ -81,6 +98,7 @@ game's default manuscript key, so avoid it.
 
 IF SOMETHING GOES WRONG
 - Menus misbehave: set menu_small_text=0, or menu_hooks=0, in the ini.
+- The game misbehaves with radar markers: set radar_hooks=0 in the ini.
 - The game does not start: delete d3d9.dll.
 - To report a problem, attach alanwake_collectibles.log. It contains your Steam account
   number as part of a folder path; remove it first if you prefer.

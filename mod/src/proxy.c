@@ -23,8 +23,7 @@
 #include "settings.h"
 #include "steam.h"
 
-/* a test build: radar markers behind [test] radar_test */
-#define MOD_VERSION "0.9.0-radar2"
+#define MOD_VERSION "0.9.0"
 
 static HMODULE self, next;
 static int hooks_allowed;
@@ -120,7 +119,6 @@ static BOOL CALLBACK initialise(PINIT_ONCE o, PVOID p, PVOID *c)
         logf_("option %s: %s, key %s", OPTIONS[i].name, OPTIONS[i].enabled ? "on" : "off",
               key_name(OPTIONS[i].key, key));
     }
-    logf_("radar_test: %d", RADAR_TEST);
     return TRUE;
 }
 
@@ -328,7 +326,7 @@ static int menu_state(struct profile *out, struct menu_options *options)
 
 static int radar_installed;
 
-/* Called from the game's HUD update (radar test builds only). */
+/* Called from the game's HUD update, once a second. */
 static int radar_state(struct profile *out, int *markers)
 {
     int ok;
@@ -381,22 +379,30 @@ static void poll_keys(void)
         struct option *o = &OPTIONS[i];
         int down = o->key && owner == GetCurrentProcessId() && (GetAsyncKeyState(o->key) & 0x8000);
 
-        if (i == OPT_RADAR_MARKERS && !radar_installed)
-            down = 0; /* the option means nothing without the radar test */
         if (o->key == VK_F4 && alt)
             down = 0; /* Alt+F4 closes the game */
 
-        if (down && !held[i]) {
+        if (down && !held[i] && i == OPT_RADAR_MARKERS && !radar_installed) {
+            char key[8];
+
+            /* nothing would show: say why instead of switching */
+            show_message(MESSAGE_MS, "%s: not available  (%s)\n%s", o->label,
+                         key_name(o->key, key),
+                         OPTIONS[OPT_RADAR_HOOKS].enabled
+                             ? "This version of the game is not supported"
+                             : "radar_hooks=0 in alanwake_collectibles.ini");
+        } else if (down && !held[i]) {
             char key[8];
             int saved = settings_toggle(i);
 
             show_message(MESSAGE_MS, "%s: %s  (%s to change)%s%s", o->label,
                          o->enabled ? "on" : "off", key_name(o->key, key),
-                         i == OPT_MENU_SMALL || i == OPT_MENU_HOOKS
+                         i == OPT_MENU_SMALL || i == OPT_MENU_HOOKS || i == OPT_RADAR_HOOKS
                                  || ((i == OPT_MENU_COUNTS || i == OPT_MENU_DETAIL)
                                      && !menu_installed)
                              ? "\nApplies the next time the game starts"
-                         : i >= OPT_EXPANDED && !OPTIONS[OPT_OVERLAY].enabled
+                         : (i == OPT_EXPANDED || i == OPT_PAGE_TITLES || i == OPT_ITEM_DETAILS)
+                                 && !OPTIONS[OPT_OVERLAY].enabled
                              ? "\nThe overlay is hidden"
                          : (i == OPT_PAGE_TITLES || i == OPT_ITEM_DETAILS)
                                  && !OPTIONS[OPT_EXPANDED].enabled
@@ -736,7 +742,6 @@ static void restore_hooks(IDirect3DDevice9 *device)
 static void hooked_frame(IDirect3DDevice9 *device)
 {
     EnterCriticalSection(&lock);
-    radar_frame();
     overlay(device);
     restore_hooks(device);
     LeaveCriticalSection(&lock);
@@ -839,9 +844,13 @@ IDirect3D9 *WINAPI Direct3DCreate9(UINT version)
         static const struct menu_host host = {logf_, menu_state};
         menu_installed = menu_install(&host, OPTIONS[OPT_MENU_SMALL].enabled);
     }
-    if (hooks_allowed && next && RADAR_TEST > 0) {
+    if (!hooks_allowed) {
+        /* nothing to install */
+    } else if (next && !OPTIONS[OPT_RADAR_HOOKS].enabled) {
+        COMPLAIN("radar_hooks=0: radar left alone");
+    } else if (next) {
         static const struct radar_host radar_host = {logf_, radar_state};
-        radar_installed = radar_install(&radar_host, RADAR_TEST);
+        radar_installed = radar_install(&radar_host);
     }
     return d3d;
 }

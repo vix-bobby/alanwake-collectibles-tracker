@@ -1,8 +1,8 @@
 # The radar
 
-How the game's radar works and how the mod puts a marker on it (`mod/src/radar.c`). From static
-analysis of `AlanWake.exe` Steam build 14596864 (SHA-256 `ba208225...282e`, base 0x400000, no
-ASLR), `rl_sf_Win32.dll` and `loc_sf_Win32.dll`.
+How the game's radar works and how the mod puts a marker on it (`mod/src/radar.c`, targets in
+`mod/src/radar_targets.h`). From static analysis of `AlanWake.exe` (the build described in
+[executable.md](executable.md)), `rl_sf_Win32.dll` and `loc_sf_Win32.dll`, plus tests in game.
 
 Marks: (v) seen in the disassembly or data; (i) inferred; (?) not established.
 
@@ -94,6 +94,7 @@ Marks: (v) seen in the disassembly or data; (i) inferred; (?) not established.
   - (v) `*(u8*)([0x76c5d8] + 0x144)` must be set. (i) This is probably the HUD option in the video
     settings: the string `MENU_VIDEO_PC_HUD` exists. (?) Not tied down.
   - (?) Not established: when the radar is visible during normal play.
+- In game, the radar pointer is NULL in menus.
 - (v) Reset: the world reset 0x578760 calls `Radar::reset` 0x586630, which resizes the array to 0.
   `Radar::load` also starts with a reset. After any load or restart the markers are gone and must
   be re-added.
@@ -105,7 +106,8 @@ Marks: (v) seen in the disassembly or data; (i) inferred; (?) not established.
   - The registry (`.../GIDRegistry.txt`, `class(decimal),id(hex),path,guid`) gives these values
     directly. They are the same pairs that script bytecode pushes (`collectibles.py` relies on
     this).
-- (v) A collectible's **mesh** child (class 100) is accepted. Examples:
+- (v) A collectible's **mesh** child (class 100) is accepted; section 7 has the order in which the
+  mod picks objects. Examples:
   - `...dlc1_collectible_alarm_clock_000::prefab::AlarmClock`
   - `...cutout_weaver_000::prefab::Sign::cutouts_weaver_000`
   - Or the class 113 `Player_Waypoint` that cutouts have.
@@ -194,8 +196,8 @@ Marks: (v) seen in the disassembly or data; (i) inferred; (?) not established.
     case table and the state-0 branch at 0x43eb71 (`84 c9 74 56`) are part of the build check.
   - Once stopped, the mod also stops calling into game objects.
   - (i) The camera follows Alan a few metres away. Since the radar is centred on the camera,
-    "nearest" uses the same centre as the dots.
-- **Distance**: on the ground plane (x, z), since the radar is flat.
+    "nearest" uses the same centre as the dots (for the player's
+    position see section 9).
 - **An object's position without a marker** (v). It uses exactly the calls the game's own radar
   code makes:
   1. `p = GlobalIDMap::getPointer(gid)`, then `go = p->vtbl[7](p)`: as in AddMapEntity
@@ -208,7 +210,152 @@ Marks: (v) seen in the disassembly or data; (i) inferred; (?) not established.
   - (i) Class 113 is proven in game, through the radar. Class 100 follows the same path
     (alarm clock meshes).
 
-## 7. Script route (ep999 archive): rejected
+## 7. All categories, every level
+
+### Object classes (v)
+
+Classes were found by locating registry GIDs in each `cid_*.bin` table.
+
+| Class | Type | Accepted by AddMapEntity |
+|---|---|---|
+| 84 | Character | yes |
+| 85 | Trigger | yes |
+| 90 | prefab root ("Floating" script) | no |
+| 99 | Vehicle | yes |
+| 100 | DynamicObject (mesh) | yes |
+| 113 | Waypoint | yes |
+| 125 / 129 | keyframer / keyframed object | no |
+| 135 | Item | no |
+| 144 | ScriptInstance | yes |
+
+- What `getPointer` returns is the object's **script**. Script method 7 gives the object:
+  - DynamicObjectScript 0x64ba94, WaypointScript 0x64c180 and ItemScript use 0x573740, which
+    returns `[+0xc]`;
+  - TriggerScript 0x64c070 uses 0x578140, which returns `[+0x10]`;
+  - ScriptInstanceScript and FloatingScript use 0x44e910, which returns NULL. So class 144 and
+    90 objects can never be marked (AddMapEntity would skip them).
+- Object method 1 (the transform), for the primary vtables (RTTI offset 0):
+
+  | Object | Vtable | Method 1 | Transform |
+  |---|---|---|---|
+  | DynamicObject | 0x639e4c | 0x44e770 | `+0x70` |
+  | Trigger | 0x6466a4 | 0x5680d0 | `+0x40` |
+  | Waypoint | 0x6470bc | 0x544c90 | `[+0x28] + 0x10` |
+
+- For these known script and object types, radar.c reads the position from memory and calls
+  nothing. For any other type it calls methods 7 and 1, as the game's radar does, and
+  logs the type once.
+
+### Can the item be picked up (v for the stored state; i for what it means)
+
+- DynamicObjectScript: Hide sets or clears bit 0 of `+0x28` (0x570b73 and 0x570b79).
+- TriggerScript: EnableTrigger stores its argument at `+0x18` (0x573a67).
+- A marker is placed only if its mesh is not hidden and its trigger is enabled. If the mesh or
+  trigger is not loaded, the item counts as unavailable. If the type is unknown, it counts as
+  available.
+- (i) Whether every "not yet available" item is hidden or switched off in game is not known.
+
+### Difficulty (v)
+
+- The menu's "difficulty" command stores 0 (normal), 1 (hard) or 2 (nightmare) with 0x544730
+  into the first int of `[0x76b560]` (getter 0x5af350).
+- The difficulty system's save 0x5af4f0 writes that int, and its load 0x5af550 reads it back.
+- Nightmare-only pages are wanted only when it is 2. When it cannot be read, they are left out.
+- No item script checks difficulty (all script calls in the item prefabs were decoded).
+
+### Targets (`gen_catalog.py` → `src/radar_targets.h`)
+
+- **Rules, per awarding script:**
+  - Root: a class 90 script is its own root; otherwise the part before `::prefab`, or else the
+    parent group. A root with more than 24 objects is too broad.
+  - Position, in order: `Player_Waypoint` (113), the item's mesh (100, matched by a name per
+    category), the awarding trigger (85), the root's own `PublicInterface` trigger.
+  - Checks: the mesh, if there is one; the trigger, if the awarding script is one.
+- **Result:** 335 targets; 320 of 324 items are covered.
+  - Without a target:
+    - pages #0 and #1 (cutscene `cine_3150`, level 3);
+    - pages #61 and #63 (story tasks in level 11).
+  - Per category (position class, then checks):
+
+    | Category | Targets |
+    |---|---|
+    | Pages | 98 mesh+hide, 9 trigger+enabled, 3 trigger without check |
+    | Thermoses | 99 mesh, 1 mesh+trigger, 1 trigger |
+    | Can pyramids | 12 mesh |
+    | Chests | 28 trigger without check, 2 trigger+enabled |
+    | Radio shows | 12 trigger+enabled (two radios carry two shows each) |
+    | TV shows | 11 mesh+trigger, 3 trigger |
+    | Signs | 16 waypoint+trigger, 12 trigger |
+    | Alarm clocks | 10 mesh |
+    | Cutouts | 6 waypoint+mesh+trigger |
+    | Video games | 9 mesh, 1 trigger |
+
+  - 17 items have several objects (all nearby). None spans VC_Intact and VC_Trashed.
+- **Guard assumption re-checked (v):** every version of all 391 script bundles in all archives
+  (119,683 calls) has no AddMapEntity or RemoveMapEntity call. Scripts exist only under
+  `worlds/`.
+
+### Behaviour
+
+- Once a second, only while `radar_markers` is on: look up every target whose items are still
+  wanted (cheap: a locked binary search in the game's ID map). Then read position and state for
+  the loaded ones only, and choose the nearest by 3D distance from the camera.
+- Hysteresis: a fifth nearer and at least 5 m.
+- Removal: when found, hidden or disabled, switched off, or stopped.
+- A new radar object (menus, level changes) forgets the marker.
+- **No wait for a first save.**
+  - The radar is written only at 0x48355e, the single caller, and every save path is in the
+    main-thread mode loop or GameMode's message handler.
+  - (i) The message handler runs on the main thread too: script messages such as
+    SetDestinationEntity write the radar without locks while HUD update reads it.
+  - Every save seen in game ran on the HUD thread.
+  - The per-save thread check still skips the guard, stops markers and removes the marker if
+    that ever fails.
+  - The wait only covered the first save of a session, so it never protected a rare other path.
+- **Options:** `radar_markers` (F4, off by default) is switched at run time; `radar_hooks=0` (next
+  start) installs nothing. A `[test]` section from the test builds is deleted when the ini is
+  read.
+- **Log:**
+  - always: hooks installed or why not, the game thread, the first confirmed save;
+  - with markers: each marker added, moved or removed, with item and level; the difficulty;
+    `saved without …`;
+  - once per item and game start, why a loaded item gets no dot (`… not marked: mesh hidden`,
+    `trigger switched off`, `mesh not loaded`, `trigger not loaded`);
+  - problems: unexpected object types (once), guard skipped, stopped, and the removal of an
+    active entry of ours that is not the marker (one a skipped save would bring back).
+- **Clash check (v):** each of the 375 `(class, id)` pairs used (targets, meshes, triggers) has
+  exactly one object name in every registry version of every level.
+
+## 8. Tried in game
+
+- Passed on Windows: the dot moving with the camera, the nearest-item choice, removal on pickup,
+  reloads (the marker is added again), a checkpoint save with a marker present (`saved without
+  the 1 marker(s)`), a reload afterwards showing 0 entries, and markers across chapters.
+- Every save seen ran on the HUD thread.
+- An earlier build, limited to one level, also passed on the Steam Deck; 0.9.0 was not run
+  there.
+- TV and radio show markers have not been tried.
+- In `level_100`, the `G02` objects loaded about 30-90 s after the start.
+
+## 9. Height indicator (not used by the mod)
+
+- (v) `Radar::drawDestination` 0x584dd0 adds a chevron (sprite 16 up, 17 down) to the objective
+  marker when its height flag `[radar+0x2a1]` is set, the horizontal distance is below 30 m and
+  the height difference above 3 m. Map entities, such as our marker, have no height indicator.
+- (i, strong) Its reference is the player character, `[[0x6da074] + 0x1c]` (primary vtable
+  0x63bcfc, transform as for DynamicObject, position at `+0x94`). Not checked in game.
+- The camera is no substitute as a height reference: it is above and behind the character and
+  moves with aiming.
+- (v) An entry's sprite (`+0xd8`) is read by the draw pass every frame (0x585114), so it can be
+  changed in place. Calling AddMapEntity again with the same GID also updates the entry without
+  resetting the fade.
+- (v) Marker sounds, only for a non-zero sprite (update 0x585bb0): an active entry with fade
+  exactly 0 plays "Global sprite appear received sound" (0x53d230); an inactive one with fade
+  exactly 1 plays "Global sprite disappear received sound" (0x53d250).
+- A text label cannot easily stand in for an arrow: no suitable string id was found in the
+  English table. (i) An unknown id seems to be shown as the id text itself, and cached.
+
+## 10. Script route (ep999 archive): rejected
 
 It needs a rebuilt level bundle that replaces a shipped one (the mod only adds files), has
 the same save problem, cannot know what has been found unless the script calls
