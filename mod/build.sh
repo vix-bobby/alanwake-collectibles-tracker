@@ -7,9 +7,10 @@ CFLAGS="-std=gnu11 -O2 -Wall -Wextra"
 mkdir -p build
 
 $CC $CFLAGS -shared -static -static-libgcc -s -Wl,--kill-at -Wl,--enable-stdcall-fixup \
-    -o build/d3d9.dll src/proxy.c src/profile.c src/counts.c src/settings.c src/label.c src/menu.c src/checkpoint.c src/steam.c src/d3d9.def -ladvapi32 -luser32
+    -o build/d3d9.dll src/proxy.c src/profile.c src/counts.c src/settings.c src/label.c src/menu.c src/checkpoint.c src/steam.c src/radar.c src/d3d9.def -ladvapi32 -luser32
 $CC $CFLAGS -static -o build/harness.exe test/harness.c -luser32
 $CC $CFLAGS -static -o build/menu_test.exe test/menu_test.c src/label.c src/counts.c src/profile.c
+$CC $CFLAGS -static -o build/radar_test.exe test/radar_test.c
 
 if [ "${1:-}" = test ]; then
     # made-up fixtures by default; CONFIG and REPORT point the tests at real files instead
@@ -29,6 +30,7 @@ if [ "${1:-}" = test ]; then
     setarch -R python3 test/test_chapter.py build/chapter_test "$config" "$report" \
         "$(dirname "$config")/savegame.aws"
     (cd build && ./menu_test.exe)
+    (cd build && ./radar_test.exe)
     # the settings file is tested on a Windows disk: saving fails on \\wsl network paths
     $CC $CFLAGS -static -o build/settings_test.exe test/settings_test.c src/settings.c
     wintemp=$(wslpath "$(cmd.exe /c 'echo %TEMP%' 2>/dev/null | tr -d '\r')" )

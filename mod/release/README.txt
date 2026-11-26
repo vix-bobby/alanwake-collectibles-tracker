@@ -29,16 +29,16 @@ Steam's "verify integrity of game files" does not remove the mod's files.
 
 IN GAME
 - Overlay, bottom left: found / total for the chapter of your last checkpoint, and in
-  brackets for its whole episode. F8 shows or hides it.
-- F10 adds the list of what is missing in that chapter; press it again for counts only.
+  brackets for its whole episode. F1 shows or hides it.
+- F7 adds the list of what is missing in that chapter; press it again for counts only.
   Items are numbered within the chapter.
   WARNING: the order was extracted from the game data and may not be the order in which you
   find the items in game. The same applies to the names shown for some chests and signs:
   they come from the game's code and may not match what you see in game.
-  Two mild spoilers are off by default: F1 shows manuscript page titles in the list instead
-  of page numbers, F2 adds details to other items: who each cardboard cutout shows, and
+  Two mild spoilers are off by default: F9 shows manuscript page titles in the list instead
+  of page numbers, F10 adds details to other items: who each cardboard cutout shows, and
   where some chests and signs are.
-- Episode and chapter menus: what is left to find, updated as you play. F9 shows or hides it.
+- Episode and chapter menus: what is left to find, updated as you play. F2 shows or hides it.
 - Nightmare-only manuscript pages are counted separately.
 - The mod's text is in English, whatever the game's language.
 
@@ -46,6 +46,10 @@ SETTINGS (alanwake_collectibles.ini)
 The file is created in the game folder, next to AlanWake.exe, the first time you start the
 game with the mod. Open it with Notepad. Edits apply the next time you start the game.
 Delete the file to restore the defaults.
+
+Updating from 0.8.0 or earlier: the hotkeys have changed. At the first start the file is
+rewritten with the new default keys (custom ones too); your other settings are kept, except
+that a margin_y of 9, the former default, becomes 10.
 
 [options]          1 = on, 0 = off
   overlay          1   Show the overlay.
@@ -58,14 +62,14 @@ Delete the file to restore the defaults.
   item_details     0   Cutout names, and where some chests and signs are, in that list.
 
 [keys]             F1 to F24, or none
-  overlay          F8
-  menu_counts      F9
+  overlay          F1
+  menu_counts      F2
   menu_detail      none
   menu_small_text  none
   menu_hooks       none
-  overlay_expanded F10
-  page_titles      F1
-  item_details     F2
+  overlay_expanded F7
+  page_titles      F9
+  item_details     F10
 Each key switches the option of the same name and saves your choice in the file. It acts at
 once, except for menu_small_text and menu_hooks, which apply at the next start. F5 is the
 game's default manuscript key, so avoid it.
@@ -73,7 +77,7 @@ game's default manuscript key, so avoid it.
 [position]         where the overlay sits
   corner           bottom-left   Or top-left, top-right, bottom-right.
   margin_x         1             Distance from the side, in % of the screen width (0-90).
-  margin_y         9             Distance from top or bottom, in % of the screen height (0-90).
+  margin_y         10            Distance from top or bottom, in % of the screen height (0-90).
 
 IF SOMETHING GOES WRONG
 - Menus misbehave: set menu_small_text=0, or menu_hooks=0, in the ini.

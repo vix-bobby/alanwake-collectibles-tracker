@@ -19,10 +19,12 @@
 #include "menu.h"
 #include "path.h"
 #include "profile.h"
+#include "radar.h"
 #include "settings.h"
 #include "steam.h"
 
-#define MOD_VERSION "0.8.0"
+/* a test build: radar markers behind [test] radar_test */
+#define MOD_VERSION "0.9.0-radar2"
 
 static HMODULE self, next;
 static int hooks_allowed;
@@ -110,7 +112,7 @@ static BOOL CALLBACK initialise(PINIT_ONCE o, PVOID p, PVOID *c)
     next = to_wide(path, wide, PATH_WIDE) ? LoadLibraryW(wide) : NULL;
     logf_("forwarding to %s: %s", path, next ? "ok" : "FAILED");
     snprintf(path, sizeof path, "%salanwake_collectibles.ini", dir);
-    settings_load(path);
+    settings_load(path, MOD_VERSION);
     logf_("overlay %s-%s, margins %d%% %d%%", POSITION.bottom ? "bottom" : "top",
           POSITION.right ? "right" : "left", POSITION.margin_x, POSITION.margin_y);
     for (int i = 0; i < OPT_COUNT; i++) {
@@ -118,6 +120,7 @@ static BOOL CALLBACK initialise(PINIT_ONCE o, PVOID p, PVOID *c)
         logf_("option %s: %s, key %s", OPTIONS[i].name, OPTIONS[i].enabled ? "on" : "off",
               key_name(OPTIONS[i].key, key));
     }
+    logf_("radar_test: %d", RADAR_TEST);
     return TRUE;
 }
 
@@ -323,6 +326,23 @@ static int menu_state(struct profile *out, struct menu_options *options)
     return ok;
 }
 
+static int radar_installed;
+
+/* Called from the game's HUD update (radar test builds only). */
+static int radar_state(struct profile *out, int *markers)
+{
+    int ok;
+
+    EnterCriticalSection(&lock);
+    refresh_profile();
+    ok = profile_ok;
+    if (ok)
+        *out = profile;
+    *markers = OPTIONS[OPT_RADAR_MARKERS].enabled;
+    LeaveCriticalSection(&lock);
+    return ok;
+}
+
 /* ---------------------------------------------------------------- hotkeys */
 
 #define MESSAGE_MS 4000
@@ -352,6 +372,7 @@ static void poll_keys(void)
     static int held[OPT_COUNT];
     DWORD owner = 0;
     HWND window = GetForegroundWindow();
+    int alt = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
     int i;
 
     if (window)
@@ -359,6 +380,11 @@ static void poll_keys(void)
     for (i = 0; i < OPT_COUNT; i++) {
         struct option *o = &OPTIONS[i];
         int down = o->key && owner == GetCurrentProcessId() && (GetAsyncKeyState(o->key) & 0x8000);
+
+        if (i == OPT_RADAR_MARKERS && !radar_installed)
+            down = 0; /* the option means nothing without the radar test */
+        if (o->key == VK_F4 && alt)
+            down = 0; /* Alt+F4 closes the game */
 
         if (down && !held[i]) {
             char key[8];
@@ -374,7 +400,8 @@ static void poll_keys(void)
                              ? "\nThe overlay is hidden"
                          : (i == OPT_PAGE_TITLES || i == OPT_ITEM_DETAILS)
                                  && !OPTIONS[OPT_EXPANDED].enabled
-                             ? "\nShown in the missing list" : "",
+                             ? "\nShown in the missing list"
+                         : i == OPT_RADAR_MARKERS && o->enabled ? radar_note() : "",
                          saved ? "" : "\nCould not save to alanwake_collectibles.ini");
             logf_("%s switched %s%s", o->name, o->enabled ? "on" : "off",
                   saved ? "" : " (not saved)");
@@ -395,13 +422,17 @@ static void introduce(void)
                  key_name(OPTIONS[OPT_OVERLAY].key, key));
 }
 
-/* The overlay is a stack of text blocks in two sizes. */
-enum { BLOCK_HEADER, BLOCK_COUNTS, BLOCK_MISSING, BLOCK_FOOTER, BLOCK_MESSAGE, BLOCK_COUNT };
+/* The overlay is a stack of text blocks in two sizes; the keys are in two columns. */
+enum {
+    BLOCK_HEADER, BLOCK_COUNTS, BLOCK_MISSING, BLOCK_FOOTER, BLOCK_KEYS, BLOCK_LIST_KEYS,
+    BLOCK_MESSAGE, BLOCK_COUNT
+};
 
 struct block {
     char text[2000];
     int small;
-    int gap; /* empty line above, if anything precedes */
+    int gap;    /* empty line above, if anything precedes */
+    int beside; /* to the right of the previous block instead of under it */
 };
 
 static void add_line(struct block *b, const char *format, ...)
@@ -424,6 +455,8 @@ static int overlay_blocks(struct block *blocks)
 
     memset(blocks, 0, BLOCK_COUNT * sizeof *blocks);
     blocks[BLOCK_HEADER].small = footer->small = 1;
+    blocks[BLOCK_KEYS].small = blocks[BLOCK_LIST_KEYS].small = 1;
+    blocks[BLOCK_LIST_KEYS].beside = 1;
     blocks[BLOCK_MISSING].gap = footer->gap = blocks[BLOCK_MESSAGE].gap = 1;
     if (OPTIONS[OPT_OVERLAY].enabled) {
         add_line(&blocks[BLOCK_HEADER], "Collectibles mod " MOD_VERSION);
@@ -441,14 +474,17 @@ static int overlay_blocks(struct block *blocks)
                              blocks[BLOCK_MISSING].text, sizeof blocks[BLOCK_MISSING].text);
         } else
             add_line(counts, "Current chapter unknown: no checkpoint found");
+        /* left column: general keys; right column: the missing list and what it shows */
         for (i = 0; i < OPT_COUNT; i++) {
+            int list = i == OPT_EXPANDED || i == OPT_PAGE_TITLES || i == OPT_ITEM_DETAILS;
             char key[8];
             /* the spoiler keys matter only while the list is shown */
-            if (OPTIONS[i].key
+            if (OPTIONS[i].key && (i != OPT_RADAR_MARKERS || radar_installed)
                 && (OPTIONS[OPT_EXPANDED].enabled
                     || (i != OPT_PAGE_TITLES && i != OPT_ITEM_DETAILS)))
-                add_line(footer, "[%s]  %s: %s", key_name(OPTIONS[i].key, key),
-                         OPTIONS[i].label, OPTIONS[i].enabled ? "on" : "off");
+                add_line(&blocks[list ? BLOCK_LIST_KEYS : BLOCK_KEYS], "[%s]  %s: %s",
+                         key_name(OPTIONS[i].key, key), OPTIONS[i].label,
+                         OPTIONS[i].enabled ? "on" : "off");
         }
     }
     if (message_visible())
@@ -510,8 +546,9 @@ static void draw_blocks(IDirect3DDevice9 *device, const struct block *blocks)
 {
     D3DVIEWPORT9 view;
     D3DRECT box;
-    RECT size[BLOCK_COUNT];
+    RECT at[BLOCK_COUNT]; /* where each block goes, from the box's top left */
     int height, pad, width = 0, total = 0, x, y, i;
+    int top = 0, right = 0; /* of the last block placed, for one beside it */
     HRESULT hr = IDirect3DDevice9_GetViewport(device, &view);
 
     if (FAILED(hr)) {
@@ -524,16 +561,26 @@ static void draw_blocks(IDirect3DDevice9 *device, const struct block *blocks)
         return;
 
     for (i = 0; i < BLOCK_COUNT; i++) {
+        RECT size;
+        int beside = blocks[i].beside && blocks[i - 1].text[0];
+
         if (!blocks[i].text[0])
             continue;
-        SetRect(&size[i], 0, 0, 0, 0);
-        ID3DXFont_DrawTextA(fonts[blocks[i].small], NULL, blocks[i].text, -1, &size[i],
+        SetRect(&size, 0, 0, 0, 0);
+        ID3DXFont_DrawTextA(fonts[blocks[i].small], NULL, blocks[i].text, -1, &size,
                             DT_CALCRECT | DT_LEFT, 0);
-        if (blocks[i].gap && total)
-            total += height;
-        total += size[i].bottom;
-        if (size[i].right > width)
-            width = size[i].right;
+        if (!beside) {
+            if (blocks[i].gap && total)
+                total += height;
+            top = total;
+        }
+        OffsetRect(&size, beside ? right + 2 * height : 0, top);
+        at[i] = size;
+        right = size.right;
+        if (size.bottom > total)
+            total = size.bottom;
+        if (size.right > width)
+            width = size.right;
     }
 
     /* place the box in its corner, keeping it on the screen */
@@ -558,19 +605,17 @@ static void draw_blocks(IDirect3DDevice9 *device, const struct block *blocks)
     box.y2 = y + total + pad;
     IDirect3DDevice9_Clear(device, 1, &box, D3DCLEAR_TARGET, D3DCOLOR_XRGB(12, 12, 16), 0, 0);
 
-    for (i = 0, total = 0; i < BLOCK_COUNT; i++) {
+    for (i = 0; i < BLOCK_COUNT; i++) {
         RECT area;
 
         if (!blocks[i].text[0])
             continue;
-        if (blocks[i].gap && total)
-            total += height;
-        SetRect(&area, x, y + total, x + width, y + total + size[i].bottom);
+        area = at[i];
+        OffsetRect(&area, x, y);
         ID3DXFont_DrawTextA(fonts[blocks[i].small], NULL, blocks[i].text, -1, &area,
                             DT_LEFT | DT_NOCLIP,
                             blocks[i].small ? D3DCOLOR_XRGB(176, 176, 170)
                                             : D3DCOLOR_XRGB(240, 240, 232));
-        total += size[i].bottom;
     }
 }
 
@@ -691,6 +736,7 @@ static void restore_hooks(IDirect3DDevice9 *device)
 static void hooked_frame(IDirect3DDevice9 *device)
 {
     EnterCriticalSection(&lock);
+    radar_frame();
     overlay(device);
     restore_hooks(device);
     LeaveCriticalSection(&lock);
@@ -792,6 +838,10 @@ IDirect3D9 *WINAPI Direct3DCreate9(UINT version)
     } else if (next) {
         static const struct menu_host host = {logf_, menu_state};
         menu_installed = menu_install(&host, OPTIONS[OPT_MENU_SMALL].enabled);
+    }
+    if (hooks_allowed && next && RADAR_TEST > 0) {
+        static const struct radar_host radar_host = {logf_, radar_state};
+        radar_installed = radar_install(&radar_host, RADAR_TEST);
     }
     return d3d;
 }

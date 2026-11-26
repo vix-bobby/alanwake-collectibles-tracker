@@ -8,20 +8,24 @@
 #include "settings.h"
 
 struct option OPTIONS[OPT_COUNT] = {
-    {"overlay", "Overlay", 1, VK_F8},
-    {"menu_counts", "Menu counts", 1, VK_F9},
+    {"overlay", "Overlay", 1, VK_F1},
+    {"menu_counts", "Menu counts", 1, VK_F2},
     {"menu_detail", "Menu counts per type", 1, 0},
     {"menu_small_text", "Small menu counts", 1, 0},
     {"menu_hooks", "Menu changes", 1, 0},
-    {"overlay_expanded", "Missing list", 0, VK_F10},
-    {"page_titles", "Page titles in the list", 0, VK_F1},
-    {"item_details", "Item details in the list", 0, VK_F2},
+    {"overlay_expanded", "Missing list", 0, VK_F7},
+    {"page_titles", "Page titles", 0, VK_F9},
+    {"item_details", "Item details", 0, VK_F10},
+    {"radar_markers", "Radar markers", 0, VK_F4},
 };
 
 /* clear of the radar and objective (top left) and above the subtitles */
-struct position POSITION = {0, 1, 1, 9};
+struct position POSITION = {0, 1, 1, 10};
+
+int RADAR_TEST;
 
 static wchar_t ini[PATH_WIDE];
+static char version[32]; /* of the running mod, recorded as [mod] version */
 
 #define POSITION_TEMPLATE                                                              \
     "\r\n"                                                                             \
@@ -30,18 +34,19 @@ static wchar_t ini[PATH_WIDE];
     "corner=bottom-left\r\n"                                                           \
     "; Distance from the side, and from the top or bottom, in percent of the screen\r\n" \
     "margin_x=1\r\n"                                                                   \
-    "margin_y=9\r\n"
+    "margin_y=10\r\n"
 
 static const char TEMPLATE[] =
     "; Alan Wake collectibles mod. Delete this file to restore the defaults.\r\n"
     "; Edits to this file apply the next time the game starts. The keys below act at once.\r\n"
     ";\r\n"
     "; Default keys in game:\r\n"
-    ";   F8  show or hide the overlay\r\n"
-    ";   F9  show or hide the counts in the episode and chapter menus\r\n"
-    ";   F10 expand the overlay with the list of what is missing, or simplify it\r\n"
-    ";   F1  name manuscript pages in that list by title instead of number (spoilers)\r\n"
-    ";   F2  add details to other items in that list: cutout names, where some are (spoilers)\r\n"
+    ";   F1  show or hide the overlay\r\n"
+    ";   F2  show or hide the counts in the episode and chapter menus\r\n"
+    ";   F4  test builds only: mark the nearest missing collectible on the radar\r\n"
+    ";   F7  expand the overlay with the list of what is missing, or simplify it\r\n"
+    ";   F9  name manuscript pages in that list by title instead of number (spoilers)\r\n"
+    ";   F10 add details to other items in that list: cutout names, where some are (spoilers)\r\n"
     "\r\n"
     "[options]\r\n"
     "; 1 = on, 0 = off (the keys above change these and save them here)\r\n"
@@ -59,17 +64,20 @@ static const char TEMPLATE[] =
     "page_titles=0\r\n"
     "; 1 = that list adds cutout names, and where some chests and signs are (mild spoilers)\r\n"
     "item_details=0\r\n"
+    "; test builds only, with [test] radar_test=2: 1 = mark the nearest missing collectible on the radar\r\n"
+    "radar_markers=0\r\n"
     "\r\n"
     "[keys]\r\n"
     "; F1 to F24, or none. F5 is the game's default manuscript key.\r\n"
-    "overlay=F8\r\n"
-    "menu_counts=F9\r\n"
+    "overlay=F1\r\n"
+    "menu_counts=F2\r\n"
     "menu_detail=none\r\n"
     "menu_small_text=none\r\n"
     "menu_hooks=none\r\n"
-    "overlay_expanded=F10\r\n"
-    "page_titles=F1\r\n"
-    "item_details=F2\r\n" POSITION_TEMPLATE;
+    "overlay_expanded=F7\r\n"
+    "page_titles=F9\r\n"
+    "item_details=F10\r\n"
+    "radar_markers=F4\r\n" POSITION_TEMPLATE;
 
 const char *key_name(int key, char out[8])
 {
@@ -208,16 +216,40 @@ static void drop_taken_defaults(const int *from_file)
                 OPTIONS[i].key = 0;
 }
 
-void settings_load(const char *path)
+/* Put the version and every current choice into the file. */
+static int save_all(void)
+{
+    int i, saved = ini_set("mod", "version", version);
+
+    for (i = 0; i < OPT_COUNT; i++) {
+        char key[8];
+
+        key_name(OPTIONS[i].key, key);
+        saved &= save_option(&OPTIONS[i]);
+        saved &= ini_set("keys", OPTIONS[i].name, OPTIONS[i].key ? key : "none");
+    }
+    if (RADAR_TEST)
+        saved &= ini_set("test", "radar_test", RADAR_TEST == 1 ? "1" : "2");
+    return saved & save_position();
+}
+
+void settings_load(const char *path, const char *mod_version)
 {
     int from_file[OPT_COUNT] = {0};
-    char value[16];
-    int i;
+    char value[32];
+    int i, created, outdated;
 
     to_wide(path, ini, PATH_WIDE);
-    if (!create_file())
+    snprintf(version, sizeof version, "%s", mod_version);
+    created = create_file();
+    /* a file without a version was written before the keys changed: its keys are not read */
+    outdated = !created && !ini_get("mod", "version", value, sizeof value);
+    if (!created)
         add_position_section();
     load_position();
+    RADAR_TEST = ini_number("test", "radar_test", 0);
+    if (RADAR_TEST < 0 || RADAR_TEST > 2)
+        RADAR_TEST = 0;
     for (i = 0; i < OPT_COUNT; i++) {
         struct option *o = &OPTIONS[i];
 
@@ -225,10 +257,23 @@ void settings_load(const char *path)
         if (!ini_get("options", o->name, value, sizeof value))
             save_option(o);
         o->enabled = ini_number("options", o->name, o->enabled) != 0;
-        if (ini_get("keys", o->name, value, sizeof value)) {
+        if (!outdated && ini_get("keys", o->name, value, sizeof value)) {
             o->key = parse_key(value, o->key);
             from_file[i] = 1;
         }
+    }
+    if (created) {
+        ini_set("mod", "version", version);
+        return;
+    }
+    if (outdated) {
+        /* write the file anew, so that its comments name the new keys; choices are kept,
+         * except that the former default margin follows the new one */
+        if (POSITION.margin_y == 9)
+            POSITION.margin_y = 10;
+        if (DeleteFileW(ini) && create_file())
+            save_all();
+        return;
     }
     drop_taken_defaults(from_file);
     /* and name the keys of options added since the file was written */
@@ -239,6 +284,9 @@ void settings_load(const char *path)
             key_name(OPTIONS[i].key, key);
             ini_set("keys", OPTIONS[i].name, OPTIONS[i].key ? key : "none");
         }
+    ini_get("mod", "version", value, sizeof value);
+    if (strcmp(value, version) != 0)
+        ini_set("mod", "version", version);
 }
 
 int settings_toggle(int option)
@@ -246,18 +294,7 @@ int settings_toggle(int option)
     struct option *o = &OPTIONS[option];
 
     o->enabled = !o->enabled;
-    if (create_file()) {
-        /* the file was deleted while running: put every current choice back into it */
-        int i, saved = 1;
-
-        for (i = 0; i < OPT_COUNT; i++) {
-            char key[8];
-
-            key_name(OPTIONS[i].key, key);
-            saved &= save_option(&OPTIONS[i]);
-            saved &= ini_set("keys", OPTIONS[i].name, OPTIONS[i].key ? key : "none");
-        }
-        return saved & save_position();
-    }
+    if (create_file())
+        return save_all(); /* the file was deleted while running */
     return save_option(o);
 }

@@ -11,6 +11,7 @@ enum {
     OPT_EXPANDED,
     OPT_PAGE_TITLES,
     OPT_ITEM_DETAILS,
+    OPT_RADAR_MARKERS, /* test builds: used only when the radar test is installed */
     OPT_COUNT
 };
 
@@ -32,8 +33,14 @@ struct position {
 
 extern struct position POSITION;
 
-/* Read the ini file (UTF-8 full path), creating it with explanatory comments if it does not exist. */
-void settings_load(const char *path);
+/* Test builds: [test] radar_test=0 (off), 1 (log only) or 2 (one radar marker). Read only;
+ * never written to the file, and no key changes it. */
+extern int RADAR_TEST;
+
+/* Read the ini file (UTF-8 full path), creating it with comments if it does not exist, and record
+ * `mod_version` in it. A file that records no version is rewritten with the default keys, its
+ * other choices kept (the former default margin_y, 9, becomes 10). */
+void settings_load(const char *path, const char *mod_version);
 /* Flip an option and save it. Returns 0 if it could not be written. */
 int settings_toggle(int option);
 /* "F8" for VK_F8, "-" for none. */
