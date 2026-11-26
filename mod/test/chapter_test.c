@@ -1,4 +1,5 @@
-/* Native test: chapter_test CONFIG LEVEL prints the overlay text;
+/* Native test: chapter_test CONFIG LEVEL prints the overlay text; with a third argument
+ * "numbers" or "spoilers" it prints the list of missing items instead;
  * chapter_test --level FILE prints the level of a save file. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,10 +11,10 @@
 int main(int argc, char **argv)
 {
     static unsigned char data[65536];
-    static char text[900];
+    static char text[2000];
     struct profile p;
     int save = argc == 3 && strcmp(argv[1], "--level") == 0;
-    FILE *f = argc == 3 ? fopen(argv[save ? 2 : 1], "rb") : NULL;
+    FILE *f = argc >= 3 ? fopen(argv[save ? 2 : 1], "rb") : NULL;
     size_t size;
 
     if (!f)
@@ -24,7 +25,10 @@ int main(int argc, char **argv)
         printf("%d\n", checkpoint_level(data, size));
         return 0;
     }
-    if (profile_parse(data, size, &p) != 0 || !chapter_text(&p, atoi(argv[2]), text, sizeof text))
+    if (profile_parse(data, size, &p) != 0
+        || !(argc > 3 ? missing_text(&p, atoi(argv[2]), strcmp(argv[3], "spoilers") == 0,
+                                     strcmp(argv[3], "spoilers") == 0, text, sizeof text)
+                      : chapter_text(&p, atoi(argv[2]), text, sizeof text)))
         return 1;
     fputs(text, stdout);
     return 0;

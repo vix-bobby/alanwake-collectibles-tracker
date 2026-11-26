@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../src/path.h"
 #include "../src/steam.h"
 
 #define EXPECT(x)                                       \
@@ -14,22 +15,23 @@
         }                                               \
     } while (0)
 
-static char base[MAX_PATH];
+static char base[PATH_UTF8];
 
 static const char *at(const char *relative)
 {
-    static char paths[8][MAX_PATH * 2];
+    static char paths[8][PATH_UTF8 * 2];
     static int next;
     char *p = paths[next++ % 8];
 
-    snprintf(p, MAX_PATH * 2, "%s/%s", base, relative);
+    snprintf(p, PATH_UTF8 * 2, "%s/%s", base, relative);
     return p;
 }
 
 /* Create a profile for `account` below `root`, dated `age` (larger is newer). */
 static void profile(const char *root, const char *account, int age)
 {
-    char path[MAX_PATH * 2], *slash;
+    char path[PATH_UTF8 * 2], *slash;
+    wchar_t wide[PATH_WIDE];
     SYSTEMTIME t = {2020, 1, 0, 1, 0, 0, 0, 0};
     FILETIME time;
     HANDLE f;
@@ -37,14 +39,25 @@ static void profile(const char *root, const char *account, int age)
     snprintf(path, sizeof path, "%s/%s/userdata/%s/108710/remote/config", base, root, account);
     for (slash = strchr(path + strlen(base) + 1, '/'); slash; slash = strchr(slash + 1, '/')) {
         *slash = '\0';
-        CreateDirectoryA(path, NULL);
+        to_wide(path, wide, PATH_WIDE);
+        CreateDirectoryW(wide, NULL);
         *slash = '/';
     }
-    f = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    to_wide(path, wide, PATH_WIDE);
+    f = CreateFileW(wide, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
     t.wDay = (WORD)age;
     SystemTimeToFileTime(&t, &time);
     SetFileTime(f, NULL, NULL, &time);
     CloseHandle(f);
+}
+
+/* As the system would hold it: the value is UTF-8 here. */
+static void set_variable(const wchar_t *name, const char *value)
+{
+    wchar_t wide[PATH_WIDE];
+
+    to_wide(value, wide, PATH_WIDE);
+    SetEnvironmentVariableW(name, wide);
 }
 
 static void clear_variables(void)
@@ -57,9 +70,14 @@ static void clear_variables(void)
 int main(void)
 {
     struct steam_hints h = {"", 0, ""};
-    char out[1024], report[4096], buffer[256];
+    char out[PATH_UTF8 * 2], report[8192], buffer[256];
+    wchar_t dir[PATH_WIDE], folder[PATH_WIDE];
 
-    GetCurrentDirectoryA(sizeof base, base);
+    GetCurrentDirectoryW(PATH_WIDE, dir);
+    /* everything below a folder name that fits no single code page */
+    snwprintf(folder, PATH_WIDE, L"%ls\\%ls", dir, L"ゲーム Łódź");
+    CreateDirectoryW(folder, NULL);
+    EXPECT(to_utf8(folder, base, sizeof base));
     clear_variables();
 
     wine_path("/home/deck/.local/share/Steam", buffer, sizeof buffer);
@@ -85,7 +103,7 @@ int main(void)
     h.registry_path = "";
     EXPECT(!steam_find_profile(&h, out, sizeof out, report, sizeof report));
     profile("linux", "333", 4);
-    SetEnvironmentVariableA("STEAM_COMPAT_CLIENT_INSTALL_PATH", at("linux/"));
+    set_variable(L"STEAM_COMPAT_CLIENT_INSTALL_PATH", at("linux/"));
     EXPECT(steam_find_profile(&h, out, sizeof out, NULL, 0));
     EXPECT(strstr(out, "linux/userdata/333/"));
     /* a registry path leading nowhere (Proton's stub folder) does not hide it */
@@ -104,19 +122,19 @@ int main(void)
     EXPECT(!steam_find_profile(&h, out, sizeof out, report, sizeof report));
 
     /* Proton's prefix variable, for a library path */
-    SetEnvironmentVariableA("STEAM_COMPAT_DATA_PATH", at("lib/steamapps/compatdata/108710"));
+    set_variable(L"STEAM_COMPAT_DATA_PATH", at("lib/steamapps/compatdata/108710"));
     EXPECT(steam_find_profile(&h, out, sizeof out, NULL, 0) && strstr(out, "lib/userdata/444/"));
     clear_variables();
 
     /* last resort: the usual place under the Linux home folder (game on an SD card) */
     profile("home/.local/share/Steam", "555", 6);
     h.game_dir = at("sdcard/steamapps/common/Alan Wake/");
-    SetEnvironmentVariableA("WINEHOMEDIR", at("home"));
+    set_variable(L"WINEHOMEDIR", at("home"));
     EXPECT(steam_find_profile(&h, out, sizeof out, NULL, 0) && strstr(out, "userdata/555/"));
 
     /* nothing anywhere: the report names the places tried */
-    SetEnvironmentVariableA("WINEHOMEDIR", at("nobody"));
-    SetEnvironmentVariableA("STEAM_COMPAT_CLIENT_INSTALL_PATH", at("missing"));
+    set_variable(L"WINEHOMEDIR", at("nobody"));
+    set_variable(L"STEAM_COMPAT_CLIENT_INSTALL_PATH", at("missing"));
     EXPECT(!steam_find_profile(&h, out, sizeof out, report, sizeof report));
     EXPECT(strstr(report, "Proton Steam path: ") && strstr(report, "/missing"));
     EXPECT(strstr(report, "game library: ") && strstr(report, "nobody/.steam/steam"));

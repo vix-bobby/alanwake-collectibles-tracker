@@ -1,4 +1,4 @@
-# Alan Wake collectibles tracker (version 0.7.1)
+# Alan Wake collectibles tracker (version 0.8.0)
 
 For the **original Alan Wake (2010), not Alan Wake Remastered**. Tested only with the Steam
 version, on Windows and on Linux (Steam Deck).
@@ -9,6 +9,16 @@ A `d3d9.dll` that the game loads by itself. No game file is changed.
   episode; Nightmare-only pages apart. "Current" means **the chapter of your last checkpoint**
   (read from `savegame.aws`), so it follows when the game saves. The counts follow your
   profile. **F8** shows or hides it.
+- **Missing list:** **F10** switches the overlay between the counts only (default) and the
+  counts plus what is still missing in the chapter. Items are numbered within the chapter
+  (`#9` of 14).
+  Manuscript pages show their number. Two mild spoilers are off by default: **F1** shows page
+  titles (at most 16 lines), **F2** adds details to other items: who each cardboard cutout
+  shows, and where some chests and signs are.
+  **Warning:** the order was extracted from the game data and may not be the order in which you
+  find the items in game; only the cardboard cutouts have been reordered to match the game. The
+  names shown for some chests and signs also come from the game's code (reworded script names)
+  and may not match what you see in game.
 - **Menu counts:** the episode list shows what is left per type; once an episode's chapter
   list is open, its title shows the total only, e.g. `(N left, +N Nightmare)`, and each
   chapter its own types. Counts follow your profile while the game runs. **F9** shows or
@@ -27,7 +37,11 @@ A `d3d9.dll` that the game loads by itself. No game file is changed.
   | | `menu_detail` | 1 | list each type left in menu lists; 0 = totals only |
   | | `menu_small_text` | 1 | smaller counts in menu lists; 0 = normal size |
   | | `menu_hooks` | 1 | 0 = leave the menus untouched |
+  | | `overlay_expanded` | 0 | list what is missing under the counts |
+  | | `page_titles` | 0 | page titles instead of numbers in that list |
+  | | `item_details` | 0 | cutout names and chest and sign places in that list |
   | `[keys]` | `overlay`, `menu_counts` | F8, F9 | F1 to F24, or `none` |
+  | | `overlay_expanded`, `page_titles`, `item_details` | F10, F1, F2 | same |
   | | the three other option names | none | same |
   | `[position]` | `corner` | bottom-left | or top-left, top-right, bottom-right |
   | | `margin_x`, `margin_y` | 1, 9 | distance from the edges, % of the screen (0 to 90) |

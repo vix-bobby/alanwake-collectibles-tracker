@@ -1,3 +1,4 @@
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -5,6 +6,8 @@
 
 struct item {
     unsigned char level, category, number, nightmare;
+    unsigned char shown;  /* number within the chapter, as listed on screen */
+    const char *text;     /* page title, cutout name, or a hint where it is; may be NULL */
 };
 
 struct level_name {
@@ -187,5 +190,112 @@ int chapter_text(const struct profile *p, int level, char *out, size_t size)
         ADD("\n");
     }
 #undef ADD
+    return 1;
+}
+
+/* The missing-items list is built line by line; long lists wrap. */
+#define WRAP 60
+#define TITLE_LINES 16
+
+struct text {
+    char *out;
+    size_t size, length, line; /* `line` is where the current line starts */
+};
+
+static void put(struct text *t, const char *format, ...)
+{
+    va_list args;
+    int n;
+
+    if (t->length >= t->size)
+        return;
+    va_start(args, format);
+    n = vsnprintf(t->out + t->length, t->size - t->length, format, args);
+    va_end(args);
+    if (n > 0)
+        t->length += n;
+}
+
+static void new_line(struct text *t)
+{
+    put(t, "\n");
+    t->line = t->length;
+}
+
+/* Add an entry to a comma-separated list, wrapping before it if the line is full. */
+static void entry(struct text *t, int first, const char *word)
+{
+    if (!first)
+        put(t, ",");
+    if (t->length - t->line + strlen(word) + 1 > WRAP) {
+        new_line(t);
+        put(t, "   ");
+    }
+    put(t, " %s", word);
+}
+
+int missing_text(const struct profile *p, int level, int titles, int details, char *out,
+                 size_t size)
+{
+    struct text t = {out, size, 0, 0};
+    struct remaining here = {0};
+    int category, title_lines = 0, untitled = 0;
+    size_t i;
+
+    if (!size)
+        return 0;
+    out[0] = '\0';
+    count_levels(p, level, level, &here);
+    if (here.total + here.nightmare_all == 0)
+        return 0;
+    put(&t, "Missing in this chapter");
+    if (here.left + here.nightmare == 0) {
+        new_line(&t);
+        put(&t, "nothing: all found");
+        return 1;
+    }
+    for (category = 0; category < CAT_COUNT; category++) {
+        int listed = 0;
+        int by_title = titles && category == CAT_MANUSCRIPTS;
+
+        for (i = 0; i < sizeof CATALOG / sizeof *CATALOG; i++) {
+            const struct item *item = &CATALOG[i];
+            const char *hard = item->nightmare ? " (Nightmare)" : "";
+            char word[96];
+
+            if (item->level != level || item->category != category
+                || p->found[category][item->number])
+                continue;
+            if (!listed++) {
+                new_line(&t);
+                if (category == CAT_MANUSCRIPTS)
+                    put(&t, "%s:", CATEGORIES[category].label);
+                else
+                    put(&t, "%s (of %d):", CATEGORIES[category].label,
+                        here.all[category]);
+            }
+            if (by_title) {
+                if (title_lines >= TITLE_LINES) {
+                    untitled++;
+                    continue;
+                }
+                title_lines++;
+                new_line(&t);
+                put(&t, "    %d  %s%s", item->shown, item->text ? item->text : "", hard);
+                continue;
+            }
+            if (category == CAT_MANUSCRIPTS)
+                snprintf(word, sizeof word, "%d%s", item->shown, hard);
+            else if (item->text && details)
+                snprintf(word, sizeof word, "#%d (%s)", item->shown, item->text);
+            else
+                snprintf(word, sizeof word, "#%d", item->shown);
+            entry(&t, listed == 1, word);
+        }
+        if (by_title && untitled) {
+            new_line(&t);
+            put(&t, "    +%d more pages", untitled);
+        }
+    }
     return 1;
 }

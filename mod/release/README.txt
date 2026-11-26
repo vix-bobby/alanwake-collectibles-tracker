@@ -1,4 +1,4 @@
-Alan Wake collectibles tracker 0.7.1
+Alan Wake collectibles tracker 0.8.0
 ====================================
 
 Shows which collectibles you still have to find, per chapter and episode.
@@ -30,6 +30,14 @@ Steam's "verify integrity of game files" does not remove the mod's files.
 IN GAME
 - Overlay, bottom left: found / total for the chapter of your last checkpoint, and in
   brackets for its whole episode. F8 shows or hides it.
+- F10 adds the list of what is missing in that chapter; press it again for counts only.
+  Items are numbered within the chapter.
+  WARNING: the order was extracted from the game data and may not be the order in which you
+  find the items in game. The same applies to the names shown for some chests and signs:
+  they come from the game's code and may not match what you see in game.
+  Two mild spoilers are off by default: F1 shows manuscript page titles in the list instead
+  of page numbers, F2 adds details to other items: who each cardboard cutout shows, and
+  where some chests and signs are.
 - Episode and chapter menus: what is left to find, updated as you play. F9 shows or hides it.
 - Nightmare-only manuscript pages are counted separately.
 - The mod's text is in English, whatever the game's language.
@@ -45,6 +53,9 @@ Delete the file to restore the defaults.
   menu_detail      1   Menu lists show each type left to find; 0 shows totals only.
   menu_small_text  1   Counts in menu lists are smaller than the names; 0 = normal size.
   menu_hooks       1   0 leaves the game's menus completely untouched (no menu counts).
+  overlay_expanded 0   List what is missing in the chapter under the counts.
+  page_titles      0   Page titles instead of page numbers in that list.
+  item_details     0   Cutout names, and where some chests and signs are, in that list.
 
 [keys]             F1 to F24, or none
   overlay          F8
@@ -52,6 +63,9 @@ Delete the file to restore the defaults.
   menu_detail      none
   menu_small_text  none
   menu_hooks       none
+  overlay_expanded F10
+  page_titles      F1
+  item_details     F2
 Each key switches the option of the same name and saves your choice in the file. It acts at
 once, except for menu_small_text and menu_hooks, which apply at the next start. F5 is the
 game's default manuscript key, so avoid it.

@@ -8,6 +8,9 @@ enum {
     OPT_MENU_DETAIL,
     OPT_MENU_SMALL,
     OPT_MENU_HOOKS,
+    OPT_EXPANDED,
+    OPT_PAGE_TITLES,
+    OPT_ITEM_DETAILS,
     OPT_COUNT
 };
 
@@ -29,7 +32,7 @@ struct position {
 
 extern struct position POSITION;
 
-/* Read the ini file, creating it with explanatory comments if it does not exist. */
+/* Read the ini file (UTF-8 full path), creating it with explanatory comments if it does not exist. */
 void settings_load(const char *path);
 /* Flip an option and save it. Returns 0 if it could not be written. */
 int settings_toggle(int option);

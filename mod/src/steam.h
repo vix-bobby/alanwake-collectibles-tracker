@@ -5,6 +5,7 @@
 
 #include <stddef.h>
 
+/* All paths are UTF-8. */
 struct steam_hints {
     const char *registry_path; /* HKCU\Software\Valve\Steam SteamPath, or "" */
     unsigned long active_user; /* ...\ActiveProcess ActiveUser, or 0 */

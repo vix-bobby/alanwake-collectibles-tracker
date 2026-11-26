@@ -7,7 +7,9 @@ Steam version, on Windows and on Linux (Steam Deck).
   See [mod/README.md](mod/README.md).
 - `tools/`: a script listing every collectible you are missing, from your profile file.
 
-Both only read the game's files and your profile. No game data or game files are included.
+Both only read the game's files and your profile. No game files are included; the mod's item
+list holds a few short names taken from the game (episodes, chapters, manuscript page titles,
+cardboard cutouts).
 
 ## Which collectibles am I missing?
 

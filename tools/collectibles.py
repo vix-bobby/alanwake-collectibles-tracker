@@ -229,8 +229,8 @@ def read_profile(path):
     return found
 
 
-def episodes(game, lang):
-    """{level id: (sort key, episode title, chapter title)} from menu.xml and strings."""
+def string_table(game, lang):
+    """{string id: text} of one language."""
     table = game.read(f"locale/{lang}/string_table.bin")
     strings, pos = {}, 4
     for _ in range(struct.unpack_from("<I", table)[0]):
@@ -240,6 +240,12 @@ def episodes(game, lang):
         n = struct.unpack_from("<I", table, pos)[0]
         strings[key] = table[pos + 4:pos + 4 + 2 * n].decode("utf-16le")
         pos += 4 + 2 * n
+    return strings
+
+
+def episodes(game, lang):
+    """{level id: (sort key, episode title, chapter title)} from menu.xml and strings."""
+    strings = string_table(game, lang)
     menu = game.read("globaldb/menu.xml").decode("utf-8", "replace")
     levels = {}
     for block in re.finditer(r'<submenu name="episode(\d)"(.*?)</submenu>', menu, re.S):

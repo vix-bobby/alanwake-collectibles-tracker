@@ -6,10 +6,11 @@ The statistics screen only gives game-wide totals. This mod shows [b]what you st
 [size=4][b]Features[/b][/size]
 [list]
 [*][b]In-game overlay[/b]: found / total for your current chapter and its episode, updated as you pick things up.
+[*][b]Missing list[/b] (F10): which items are left in your current chapter, numbered within the chapter. Page titles (F1) and item details (F2: cutout names, where some chests and signs are) are optional.
 [*][b]Menu counts[/b]: each episode and chapter shows what is left, per type.
 [*]Manuscript pages, coffee thermoses, can pyramids, chests, radio shows, TV shows, signs, and both special episodes (alarm clocks, cardboard cutouts, video games).
 [*]Nightmare-only manuscript pages counted separately.
-[*]Hotkeys (F8 overlay, F9 menu counts) and a settings file for position, keys and text size.
+[*]Hotkeys (F8 overlay, F9 menu counts, F10 missing list, F1 page titles, F2 item details) and a settings file for position, keys and text size.
 [*]No game file is replaced, and nothing is sent anywhere.
 [/list]
 
@@ -37,11 +38,14 @@ The first time you start the game with the mod, it creates [b]alanwake_collectib
 [*][b]menu_detail[/b] (default 1): menu lists show each type left to find; 0 shows totals only.
 [*][b]menu_small_text[/b] (default 1): counts in menu lists are smaller than the names; 0 uses the normal size.
 [*][b]menu_hooks[/b] (default 1): 0 leaves the game's menus completely untouched (no menu counts).
+[*][b]overlay_expanded[/b] (default 0): list what is missing under the counts.
+[*][b]page_titles[/b] (default 0): page titles instead of page numbers in that list.
+[*][b]item_details[/b] (default 0): cutout names, and where some chests and signs are, in that list.
 [/list]
 
 [b]Keys section[/b] (F1 to F24, or none)
 [list]
-[*][b]overlay[/b] (default F8) and [b]menu_counts[/b] (default F9).
+[*][b]overlay[/b] (default F8), [b]menu_counts[/b] (F9), [b]overlay_expanded[/b] (F10), [b]page_titles[/b] (F1) and [b]item_details[/b] (F2).
 [*][b]menu_detail[/b], [b]menu_small_text[/b] and [b]menu_hooks[/b] (default none) can be given a key too.
 [*]A key switches the option of the same name and saves your choice. It acts at once, except for menu_small_text and menu_hooks, which apply at the next start.
 [*]F5 is the game's default manuscript key, so avoid it.
@@ -66,6 +70,7 @@ The first time you start the game with the mod, it creates [b]alanwake_collectib
 [size=4][b]Good to know[/b][/size]
 [list]
 [*]"Current chapter" is the chapter of your last checkpoint.
+[*][b]Warning:[/b] the numbering in the missing list was extracted from the game data and may not be the order in which you find the items in game. The names shown for some chests and signs also come from the game's code and may not match what you see in game.
 [*]An antivirus may flag the DLL, as it may any DLL that hooks into a game.
 [/list]
 
@@ -73,4 +78,5 @@ The first time you start the game with the mod, it creates [b]alanwake_collectib
 MIT: you may share and adapt this mod, keeping the copyright and licence notice.
 
 [size=4][b]Changelog[/b][/size]
+[b]0.8.0[/b] List of missing items in the current chapter (F10), with optional page titles (F1) and item details (F2). Fixed: a possible crash when another program or Windows hooks Direct3D on top of the mod; game or Steam folders with non-Latin names.
 [b]0.7.1[/b] First public release.

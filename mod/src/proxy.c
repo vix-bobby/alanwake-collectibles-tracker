@@ -17,11 +17,12 @@
 #include "checkpoint.h"
 #include "counts.h"
 #include "menu.h"
+#include "path.h"
 #include "profile.h"
 #include "settings.h"
 #include "steam.h"
 
-#define MOD_VERSION "0.7.1"
+#define MOD_VERSION "0.8.0"
 
 static HMODULE self, next;
 static int hooks_allowed;
@@ -30,17 +31,26 @@ static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
 
 /* ---------------------------------------------------------------- log */
 
-static char log_path[MAX_PATH];
+static char log_path[PATH_UTF8];
 
 static void module_dir(char *out, size_t size)
 {
+    wchar_t wide[PATH_WIDE];
     char *slash;
-    DWORD n = GetModuleFileNameA(self, out, (DWORD)size);
+    DWORD n = GetModuleFileNameW(self, wide, PATH_WIDE);
 
-    out[n < size ? n : size - 1] = '\0';
+    wide[n < PATH_WIDE ? n : PATH_WIDE - 1] = L'\0';
+    to_utf8(wide, out, (int)size);
     slash = strrchr(out, '\\');
     if (slash)
         slash[1] = '\0';
+}
+
+static FILE *open_log(const wchar_t *mode)
+{
+    wchar_t wide[PATH_WIDE];
+
+    return to_wide(log_path, wide, PATH_WIDE) ? _wfopen(wide, mode) : NULL;
 }
 
 static void logf_(const char *format, ...)
@@ -49,7 +59,7 @@ static void logf_(const char *format, ...)
     SYSTEMTIME t;
     va_list args;
 
-    if (!log_path[0] || !(f = fopen(log_path, "a")))
+    if (!log_path[0] || !(f = open_log(L"a")))
         return;
     GetLocalTime(&t);
     fprintf(f, "%04u-%02u-%02u %02u:%02u:%02u  ", t.wYear, t.wMonth, t.wDay, t.wHour,
@@ -63,7 +73,8 @@ static void logf_(const char *format, ...)
 
 static BOOL CALLBACK initialise(PINIT_ONCE o, PVOID p, PVOID *c)
 {
-    char dir[MAX_PATH], path[MAX_PATH + 32];
+    char dir[PATH_UTF8], path[PATH_UTF8 + 32];
+    wchar_t wide[PATH_WIDE];
     FILE *f;
 
     (void)o, (void)p, (void)c;
@@ -79,9 +90,9 @@ static BOOL CALLBACK initialise(PINIT_ONCE o, PVOID p, PVOID *c)
     /* log next to the DLL, or in %TEMP% if that folder is read-only */
     module_dir(dir, sizeof dir);
     snprintf(log_path, sizeof log_path, "%salanwake_collectibles.log", dir);
-    if ((f = fopen(log_path, "w")))
+    if ((f = open_log(L"w")))
         fclose(f);
-    else if (GetTempPathA(sizeof path, path))
+    else if (GetTempPathW(PATH_WIDE, wide) && to_utf8(wide, path, sizeof path))
         snprintf(log_path, sizeof log_path, "%salanwake_collectibles.log", path);
     logf_("alanwake collectibles mod " MOD_VERSION " loaded from %s", dir);
     if (!stays) /* hooking would be unsafe: forward only */
@@ -90,13 +101,13 @@ static BOOL CALLBACK initialise(PINIT_ONCE o, PVOID p, PVOID *c)
     logf_("module at %p, kept loaded: %s", (void *)self, stays ? "yes" : "no");
 
     snprintf(path, sizeof path, "%sd3d9_next.dll", dir);
-    if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) {
-        UINT n = GetSystemDirectoryA(path, MAX_PATH);
-        if (!n || n >= MAX_PATH)
+    if (path_attributes(path) == INVALID_FILE_ATTRIBUTES) {
+        UINT n = GetSystemDirectoryW(wide, MAX_PATH);
+        if (!n || n >= MAX_PATH || !to_utf8(wide, path, MAX_PATH * 3))
             return TRUE;
         strcat(path, "\\d3d9.dll");
     }
-    next = LoadLibraryA(path);
+    next = to_wide(path, wide, PATH_WIDE) ? LoadLibraryW(wide) : NULL;
     logf_("forwarding to %s: %s", path, next ? "ok" : "FAILED");
     snprintf(path, sizeof path, "%salanwake_collectibles.ini", dir);
     settings_load(path);
@@ -124,30 +135,36 @@ static FILETIME profile_time, seen_time;
 static DWORD last_check;
 static char status[256] = "profile not read yet";
 
-static int registry_string(const char *key, const char *value, char *out, DWORD size)
+static int registry_string(const wchar_t *key, const wchar_t *value, char *out, int size)
 {
-    return RegGetValueA(HKEY_CURRENT_USER, key, value, RRF_RT_REG_SZ, NULL, out, &size)
-           == ERROR_SUCCESS;
+    wchar_t wide[PATH_WIDE];
+    DWORD bytes = sizeof wide;
+
+    return RegGetValueW(HKEY_CURRENT_USER, key, value, RRF_RT_REG_SZ, NULL, wide, &bytes)
+               == ERROR_SUCCESS
+           && to_utf8(wide, out, size);
 }
 
 /* <Steam>\userdata\<account>\108710\remote\config, see steam.c */
 static int profile_path(char *out, size_t size)
 {
-    static char cached[MAX_PATH * 4], reported;
-    char steam[MAX_PATH] = "", game[MAX_PATH], report[4096];
+    static char cached[PATH_UTF8 * 2], reported;
+    char steam[PATH_UTF8] = "", game[PATH_UTF8], report[8192];
+    wchar_t given[PATH_WIDE];
     struct steam_hints hints;
     DWORD user = 0, bytes = sizeof user;
 
     /* for testing and unusual setups */
-    if (GetEnvironmentVariableA("ALANWAKE_COLLECTIBLES_PROFILE", out, (DWORD)size))
-        return 1;
-    if (cached[0] && GetFileAttributesA(cached) != INVALID_FILE_ATTRIBUTES) {
+    DWORD n = GetEnvironmentVariableW(L"ALANWAKE_COLLECTIBLES_PROFILE", given, PATH_WIDE);
+    if (n && n < PATH_WIDE)
+        return to_utf8(given, out, (int)size);
+    if (cached[0] && path_attributes(cached) != INVALID_FILE_ATTRIBUTES) {
         snprintf(out, size, "%s", cached);
         return 1;
     }
-    if (!registry_string("Software\\Valve\\Steam", "SteamPath", steam, sizeof steam))
+    if (!registry_string(L"Software\\Valve\\Steam", L"SteamPath", steam, sizeof steam))
         steam[0] = '\0';
-    if (RegGetValueA(HKEY_CURRENT_USER, "Software\\Valve\\Steam\\ActiveProcess", "ActiveUser",
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam\\ActiveProcess", L"ActiveUser",
                      RRF_RT_REG_DWORD, NULL, &user, &bytes) != ERROR_SUCCESS)
         user = 0;
     module_dir(game, sizeof game);
@@ -186,7 +203,7 @@ static void refresh_profile(void)
     static unsigned char data[65536];
     WIN32_FILE_ATTRIBUTE_DATA info;
     struct profile fresh;
-    char path[MAX_PATH * 2];
+    char path[PATH_UTF8 * 2];
     DWORD now = GetTickCount(), size = 0;
     HANDLE file;
     BOOL read;
@@ -199,7 +216,7 @@ static void refresh_profile(void)
         fail("Steam profile folder not found");
         return;
     }
-    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &info)) {
+    if (!path_info(path, &info)) {
         fail("profile file not found");
         return;
     }
@@ -211,8 +228,7 @@ static void refresh_profile(void)
         return;
     }
 
-    file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                       NULL, OPEN_EXISTING, 0, NULL);
+    file = path_open_read(path);
     if (file == INVALID_HANDLE_VALUE) {
         fail("profile file cannot be opened");
         return;
@@ -244,7 +260,7 @@ static void refresh_checkpoint(void)
     static DWORD last;
     static int loaded;
     WIN32_FILE_ATTRIBUTE_DATA info;
-    char path[MAX_PATH * 2], *name;
+    char path[PATH_UTF8 * 2], *name;
     unsigned char header[128];
     DWORD now = GetTickCount(), size = 0;
     HANDLE file;
@@ -259,7 +275,7 @@ static void refresh_checkpoint(void)
     while (name > path && name[-1] != '/' && name[-1] != '\\')
         name--;
     strcpy(name, "savegame.aws");
-    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &info)) {
+    if (!path_info(path, &info)) {
         level = loaded = 0;
         return;
     }
@@ -270,8 +286,7 @@ static void refresh_checkpoint(void)
         seen = info.ftLastWriteTime;
         return;
     }
-    file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                       NULL, OPEN_EXISTING, 0, NULL);
+    file = path_open_read(path);
     if (file == INVALID_HANDLE_VALUE)
         return;
     if (ReadFile(file, header, sizeof header, &size, NULL)) {
@@ -352,8 +367,14 @@ static void poll_keys(void)
             show_message(MESSAGE_MS, "%s: %s  (%s to change)%s%s", o->label,
                          o->enabled ? "on" : "off", key_name(o->key, key),
                          i == OPT_MENU_SMALL || i == OPT_MENU_HOOKS
-                                 || (i != OPT_OVERLAY && !menu_installed)
-                             ? "\nApplies the next time the game starts" : "",
+                                 || ((i == OPT_MENU_COUNTS || i == OPT_MENU_DETAIL)
+                                     && !menu_installed)
+                             ? "\nApplies the next time the game starts"
+                         : i >= OPT_EXPANDED && !OPTIONS[OPT_OVERLAY].enabled
+                             ? "\nThe overlay is hidden"
+                         : (i == OPT_PAGE_TITLES || i == OPT_ITEM_DETAILS)
+                                 && !OPTIONS[OPT_EXPANDED].enabled
+                             ? "\nShown in the missing list" : "",
                          saved ? "" : "\nCould not save to alanwake_collectibles.ini");
             logf_("%s switched %s%s", o->name, o->enabled ? "on" : "off",
                   saved ? "" : " (not saved)");
@@ -375,10 +396,10 @@ static void introduce(void)
 }
 
 /* The overlay is a stack of text blocks in two sizes. */
-enum { BLOCK_HEADER, BLOCK_COUNTS, BLOCK_FOOTER, BLOCK_MESSAGE, BLOCK_COUNT };
+enum { BLOCK_HEADER, BLOCK_COUNTS, BLOCK_MISSING, BLOCK_FOOTER, BLOCK_MESSAGE, BLOCK_COUNT };
 
 struct block {
-    char text[900];
+    char text[2000];
     int small;
     int gap; /* empty line above, if anything precedes */
 };
@@ -403,7 +424,7 @@ static int overlay_blocks(struct block *blocks)
 
     memset(blocks, 0, BLOCK_COUNT * sizeof *blocks);
     blocks[BLOCK_HEADER].small = footer->small = 1;
-    footer->gap = blocks[BLOCK_MESSAGE].gap = 1;
+    blocks[BLOCK_MISSING].gap = footer->gap = blocks[BLOCK_MESSAGE].gap = 1;
     if (OPTIONS[OPT_OVERLAY].enabled) {
         add_line(&blocks[BLOCK_HEADER], "Collectibles mod " MOD_VERSION);
         if (!profile_ok)
@@ -414,11 +435,18 @@ static int overlay_blocks(struct block *blocks)
             while (n && counts->text[n - 1] == '\n')
                 counts->text[--n] = '\0';
             add_line(footer, "(chapter of your last checkpoint)");
+            if (OPTIONS[OPT_EXPANDED].enabled)
+                missing_text(&profile, level, OPTIONS[OPT_PAGE_TITLES].enabled,
+                             OPTIONS[OPT_ITEM_DETAILS].enabled,
+                             blocks[BLOCK_MISSING].text, sizeof blocks[BLOCK_MISSING].text);
         } else
             add_line(counts, "Current chapter unknown: no checkpoint found");
         for (i = 0; i < OPT_COUNT; i++) {
             char key[8];
-            if (OPTIONS[i].key)
+            /* the spoiler keys matter only while the list is shown */
+            if (OPTIONS[i].key
+                && (OPTIONS[OPT_EXPANDED].enabled
+                    || (i != OPT_PAGE_TITLES && i != OPT_ITEM_DETAILS)))
                 add_line(footer, "[%s]  %s: %s", key_name(OPTIONS[i].key, key),
                          OPTIONS[i].label, OPTIONS[i].enabled ? "on" : "off");
         }
@@ -622,32 +650,32 @@ static present_fn real_present;
 static chain_present_fn real_chain_present;
 static __thread int presenting; /* one overlay per frame if Present nests */
 
+static int in_forwarded_library(void *address)
+{
+    HMODULE owner = NULL;
+
+    return GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+                                  | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                              address, &owner)
+           && owner == next;
+}
+
+/* Put a hook in a method table, or put it back: the Direct3D runtime rewrites entries of the
+ * device's table (creating a state block is enough). Once hooked, an entry is replaced only
+ * when it points into the library we forward to. Anything else there has hooked on top of us
+ * (Windows' compatibility layer does at a program's first start, overlays can too) and calls
+ * us itself: taking it as the function to call would make the two call each other forever. */
 static void patch(void *slot, void *hook, void **original)
 {
     void **entry = slot;
     DWORD protection;
 
-    if (*entry == hook || !VirtualProtect(entry, sizeof *entry, PAGE_EXECUTE_READWRITE, &protection))
+    if (*entry == hook || (*original && !in_forwarded_library(*entry))
+        || !VirtualProtect(entry, sizeof *entry, PAGE_EXECUTE_READWRITE, &protection))
         return;
     *original = *entry;
     *entry = hook;
     VirtualProtect(entry, sizeof *entry, protection, &protection);
-}
-
-/* The Direct3D runtime rewrites entries of the device's method table (creating a state block
- * is enough), which drops our hooks. Restore one only when it points back into the library we
- * forward to: patching over another tool's hook could make the two call each other forever. */
-static void repatch(void *slot, void *hook, void **original)
-{
-    void **entry = slot;
-    HMODULE owner = NULL;
-
-    if (*entry != hook
-        && GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
-                                  | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                              *entry, &owner)
-        && owner == next)
-        patch(slot, hook, original);
 }
 
 static HRESULT WINAPI my_reset(IDirect3DDevice9 *device, D3DPRESENT_PARAMETERS *parameters);
@@ -656,8 +684,8 @@ static HRESULT WINAPI my_present(IDirect3DDevice9 *device, const RECT *source, c
 
 static void restore_hooks(IDirect3DDevice9 *device)
 {
-    repatch(&device->lpVtbl->Reset, my_reset, (void **)&real_reset);
-    repatch(&device->lpVtbl->Present, my_present, (void **)&real_present);
+    patch(&device->lpVtbl->Reset, my_reset, (void **)&real_reset);
+    patch(&device->lpVtbl->Present, my_present, (void **)&real_present);
 }
 
 static void hooked_frame(IDirect3DDevice9 *device)

@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory() as tmp:
     full = Path(tmp) / "report.json"
     subprocess.run([sys.executable, "-I", str(TOOL), "--config", str(HERE / "config"),
                     "--json", str(full)], check=True, stdout=subprocess.DEVNULL)
-    keep = ("category", "number", "level", "nightmare", "found")
+    keep = ("category", "number", "level", "nightmare", "found", "label")
     rows = [{key: row[key] for key in keep} for row in json.loads(full.read_text())]
 (HERE / "report.json").write_text("[\n" + ",\n".join(json.dumps(r) for r in rows) + "\n]\n")
 print(len(rows), "items written to", HERE)

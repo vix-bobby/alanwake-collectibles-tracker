@@ -3,9 +3,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "path.h"
 #include "steam.h"
 
-#define PATH_SIZE (MAX_PATH * 2)
+#define PATH_SIZE PATH_UTF8
 #define PROFILE "108710/remote/config"
 
 void wine_path(const char *path, char *out, size_t size)
@@ -51,11 +52,13 @@ static void library_of(const char *path, char *out, size_t size)
 
 static int variable(const char *name, char *out, size_t size)
 {
+    wchar_t wide_name[64], wide[PATH_WIDE];
     char raw[PATH_SIZE];
-    DWORD n = GetEnvironmentVariableA(name, raw, sizeof raw);
+    DWORD n = to_wide(name, wide_name, 64) ? GetEnvironmentVariableW(wide_name, wide, PATH_WIDE)
+                                           : 0;
 
     out[0] = '\0';
-    if (!n || n >= sizeof raw)
+    if (!n || n >= PATH_WIDE || !to_utf8(wide, raw, sizeof raw))
         return 0;
     wine_path(raw, out, size);
     return 1;
@@ -85,23 +88,28 @@ static void collect(const struct steam_hints *hints, struct roots *r)
 /* Keep the most recently written profile below `root` seen so far. */
 static void newest_below(const char *root, char *best, size_t size, FILETIME *newest)
 {
-    char pattern[PATH_SIZE + 16], path[PATH_SIZE * 2];
-    WIN32_FIND_DATAA entry;
+    char pattern[PATH_SIZE + 16], path[PATH_SIZE * 2], account[MAX_PATH * 3];
+    wchar_t wide[PATH_WIDE];
+    WIN32_FIND_DATAW entry;
     WIN32_FILE_ATTRIBUTE_DATA info;
     HANDLE search;
 
     snprintf(pattern, sizeof pattern, "%s/userdata/*", root);
-    search = FindFirstFileA(pattern, &entry);
+    if (!to_wide(pattern, wide, PATH_WIDE))
+        return;
+    search = FindFirstFileW(wide, &entry);
     if (search == INVALID_HANDLE_VALUE)
         return;
     do {
-        snprintf(path, sizeof path, "%s/userdata/%s/" PROFILE, root, entry.cFileName);
-        if (GetFileAttributesExA(path, GetFileExInfoStandard, &info)
+        if (!to_utf8(entry.cFileName, account, sizeof account))
+            continue;
+        snprintf(path, sizeof path, "%s/userdata/%s/" PROFILE, root, account);
+        if (path_info(path, &info)
             && (!best[0] || CompareFileTime(&info.ftLastWriteTime, newest) > 0)) {
             *newest = info.ftLastWriteTime;
             snprintf(best, size, "%s", path);
         }
-    } while (FindNextFileA(search, &entry));
+    } while (FindNextFileW(search, &entry));
     FindClose(search);
 }
 
@@ -123,7 +131,7 @@ int steam_find_profile(const struct steam_hints *hints, char *out, size_t size, 
     if (hints->active_user)
         for (i = 0; i < r.count; i++) {
             snprintf(path, sizeof path, "%s/userdata/%lu", r.path[i], hints->active_user);
-            if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
+            if (path_attributes(path) != INVALID_FILE_ATTRIBUTES) {
                 snprintf(out, size, "%s/" PROFILE, path);
                 return 1;
             }

@@ -19,6 +19,13 @@ struct remaining {
  * the level is not one with a name. */
 int chapter_text(const struct profile *p, int level, char *out, size_t size);
 
+/* List what is still missing in the chapter `level`: page numbers (or, with `titles`, one
+ * titled line per page) and the other items numbered within the chapter, with `details` also
+ * naming the cutouts and saying where some items are. Returns 0 if there is nothing to
+ * collect in the level. */
+int missing_text(const struct profile *p, int level, int titles, int details, char *out,
+                 size_t size);
+
 /* Add the levels first..last (level numbers, e.g. 1..3, or 100) to *out. */
 void count_levels(const struct profile *p, int first, int last, struct remaining *out);
 

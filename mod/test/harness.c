@@ -53,6 +53,47 @@ static int unload_then_reuse(const char *path)
     return 1;
 }
 
+/* Another tool hooking on top of the mod: its hooks call whatever was in the table before. */
+typedef HRESULT(WINAPI *create_fn)(IDirect3D9 *, UINT, D3DDEVTYPE, HWND, DWORD,
+                                   D3DPRESENT_PARAMETERS *, IDirect3DDevice9 **);
+typedef HRESULT(WINAPI *reset_fn)(IDirect3DDevice9 *, D3DPRESENT_PARAMETERS *);
+typedef HRESULT(WINAPI *present_fn)(IDirect3DDevice9 *, const RECT *, const RECT *, HWND,
+                                    const RGNDATA *);
+static create_fn below_create;
+static reset_fn below_reset;
+static present_fn below_present;
+static int creates;
+
+static HRESULT WINAPI other_create(IDirect3D9 *d3d, UINT adapter, D3DDEVTYPE type, HWND window,
+                                   DWORD flags, D3DPRESENT_PARAMETERS *pp,
+                                   IDirect3DDevice9 **device)
+{
+    creates++;
+    return below_create(d3d, adapter, type, window, flags, pp, device);
+}
+
+static HRESULT WINAPI other_reset(IDirect3DDevice9 *device, D3DPRESENT_PARAMETERS *pp)
+{
+    return below_reset(device, pp);
+}
+
+static HRESULT WINAPI other_present(IDirect3DDevice9 *device, const RECT *source,
+                                    const RECT *dest, HWND window, const RGNDATA *dirty)
+{
+    return below_present(device, source, dest, window, dirty);
+}
+
+static void wrap(void *slot, void *hook, void *below)
+{
+    void **entry = slot;
+    DWORD protection;
+
+    VirtualProtect(entry, sizeof *entry, PAGE_EXECUTE_READWRITE, &protection);
+    *(void **)below = *entry;
+    *entry = hook;
+    VirtualProtect(entry, sizeof *entry, protection, &protection);
+}
+
 int main(int argc, char **argv)
 {
     HMODULE dll;
@@ -66,7 +107,7 @@ int main(int argc, char **argv)
     BITMAPINFOHEADER info = {0};
     HWND window;
     FILE *f;
-    int frame, y, round;
+    int frame, y, round, other_kept;
     DWORD blend = 0;
     const int width = 1280, height = 720;
 
@@ -85,6 +126,15 @@ int main(int argc, char **argv)
         printf("FAIL: Direct3DCreate9\n");
         return 1;
     }
+    /* hooked by another tool, then asked for Direct3D again, as the game does */
+    wrap(&d3d->lpVtbl->CreateDevice, other_create, &below_create);
+    IDirect3D9_Release(d3d);
+    if (!(d3d = create(D3D_SDK_VERSION))) {
+        printf("FAIL: second Direct3DCreate9\n");
+        return 1;
+    }
+    /* at a program's first start Windows' compatibility layer puts its own hook back here */
+    other_kept = d3d->lpVtbl->CreateDevice == other_create;
     window = CreateWindowA("STATIC", "harness", WS_POPUP, 0, 0, width, height, 0, 0, 0, 0);
     pp.Windowed = TRUE;
     pp.SwapEffect = D3DSWAPEFFECT_COPY;
@@ -96,6 +146,8 @@ int main(int argc, char **argv)
     pp.AutoDepthStencilFormat = D3DFMT_D24S8;
     CHECK(IDirect3D9_CreateDevice(d3d, 0, D3DDEVTYPE_HAL, window,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &pp, &device));
+    wrap(&device->lpVtbl->Reset, other_reset, &below_reset);
+    wrap(&device->lpVtbl->Present, other_present, &below_present);
     for (round = 0; round < 3; round++) {
         for (frame = 0; frame < 30; frame++) {
             CHECK(IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff304860, 1, 0));
@@ -113,6 +165,11 @@ int main(int argc, char **argv)
             printf("reset %d ok\n", round + 1);
         }
     }
+    if (other_kept && !creates) {
+        printf("FAIL: other tool's hook bypassed\n");
+        return 1;
+    }
+    printf("hooked on top: ok (%s)\n", other_kept ? "test hook" : "Windows' own hook");
     CHECK(IDirect3DDevice9_GetBackBuffer(device, 0, 0, D3DBACKBUFFER_TYPE_MONO, &back));
     CHECK(IDirect3DDevice9_CreateOffscreenPlainSurface(device, width, height, D3DFMT_X8R8G8B8,
                                                        D3DPOOL_SYSTEMMEM, &copy, NULL));

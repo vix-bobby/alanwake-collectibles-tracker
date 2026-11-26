@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "path.h"
 #include "settings.h"
 
 struct option OPTIONS[OPT_COUNT] = {
@@ -12,12 +13,15 @@ struct option OPTIONS[OPT_COUNT] = {
     {"menu_detail", "Menu counts per type", 1, 0},
     {"menu_small_text", "Small menu counts", 1, 0},
     {"menu_hooks", "Menu changes", 1, 0},
+    {"overlay_expanded", "Missing list", 0, VK_F10},
+    {"page_titles", "Page titles in the list", 0, VK_F1},
+    {"item_details", "Item details in the list", 0, VK_F2},
 };
 
 /* clear of the radar and objective (top left) and above the subtitles */
 struct position POSITION = {0, 1, 1, 9};
 
-static char ini[MAX_PATH + 32];
+static wchar_t ini[PATH_WIDE];
 
 #define POSITION_TEMPLATE                                                              \
     "\r\n"                                                                             \
@@ -35,6 +39,9 @@ static const char TEMPLATE[] =
     "; Default keys in game:\r\n"
     ";   F8  show or hide the overlay\r\n"
     ";   F9  show or hide the counts in the episode and chapter menus\r\n"
+    ";   F10 expand the overlay with the list of what is missing, or simplify it\r\n"
+    ";   F1  name manuscript pages in that list by title instead of number (spoilers)\r\n"
+    ";   F2  add details to other items in that list: cutout names, where some are (spoilers)\r\n"
     "\r\n"
     "[options]\r\n"
     "; 1 = on, 0 = off (the keys above change these and save them here)\r\n"
@@ -46,6 +53,12 @@ static const char TEMPLATE[] =
     "menu_small_text=1\r\n"
     "; 0 = never touch the game's menus (use this if menus misbehave)\r\n"
     "menu_hooks=1\r\n"
+    "; 1 = the overlay also lists what is missing in the chapter; 0 = counts only\r\n"
+    "overlay_expanded=0\r\n"
+    "; 1 = that list shows manuscript page titles (mild spoilers); 0 = page numbers\r\n"
+    "page_titles=0\r\n"
+    "; 1 = that list adds cutout names, and where some chests and signs are (mild spoilers)\r\n"
+    "item_details=0\r\n"
     "\r\n"
     "[keys]\r\n"
     "; F1 to F24, or none. F5 is the game's default manuscript key.\r\n"
@@ -53,7 +66,10 @@ static const char TEMPLATE[] =
     "menu_counts=F9\r\n"
     "menu_detail=none\r\n"
     "menu_small_text=none\r\n"
-    "menu_hooks=none\r\n" POSITION_TEMPLATE;
+    "menu_hooks=none\r\n"
+    "overlay_expanded=F10\r\n"
+    "page_titles=F1\r\n"
+    "item_details=F2\r\n" POSITION_TEMPLATE;
 
 const char *key_name(int key, char out[8])
 {
@@ -78,7 +94,7 @@ static int parse_key(const char *text, int fallback)
 /* Write the commented default file if there is none. Returns 1 if it was created. */
 static int create_file(void)
 {
-    HANDLE file = CreateFileA(ini, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE file = CreateFileW(ini, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
     DWORD written;
 
     if (file == INVALID_HANDLE_VALUE)
@@ -88,22 +104,54 @@ static int create_file(void)
     return 1;
 }
 
+/* The ini functions, taking our narrow names and values (all ASCII). */
+static DWORD ini_get(const char *section, const char *name, char *out, int size)
+{
+    wchar_t s[32], n[32], value[64];
+
+    to_wide(section, s, 32);
+    to_wide(name, n, 32);
+    GetPrivateProfileStringW(s, n, L"", value, 64, ini);
+    if (!to_utf8(value, out, size))
+        out[0] = '\0'; /* too long to be a value we know */
+    return (DWORD)strlen(out);
+}
+
+static int ini_set(const char *section, const char *name, const char *value)
+{
+    wchar_t s[32], n[32], v[32];
+
+    to_wide(section, s, 32);
+    to_wide(name, n, 32);
+    to_wide(value, v, 32);
+    return WritePrivateProfileStringW(s, n, v, ini) != 0;
+}
+
+static int ini_number(const char *section, const char *name, int fallback)
+{
+    wchar_t s[32], n[32];
+
+    to_wide(section, s, 32);
+    to_wide(name, n, 32);
+    return (int)GetPrivateProfileIntW(s, n, fallback, ini);
+}
+
 static int save_option(const struct option *o)
 {
-    return WritePrivateProfileStringA("options", o->name, o->enabled ? "1" : "0", ini) != 0;
+    return ini_set("options", o->name, o->enabled ? "1" : "0");
 }
 
 /* Add the position section to a file written by an earlier version. */
 static void add_position_section(void)
 {
     static const char text[] = POSITION_TEMPLATE;
-    char keys[64];
+    wchar_t keys[64];
     DWORD written;
     HANDLE file;
 
-    if (GetPrivateProfileSectionA("position", keys, sizeof keys, ini))
+    if (GetPrivateProfileSectionW(L"position", keys, 64, ini))
         return;
-    file = CreateFileA(ini, FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+    file = CreateFileW(ini, FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_EXISTING,
                        FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE)
         return;
@@ -113,7 +161,7 @@ static void add_position_section(void)
 
 static int read_margin(const char *name, int fallback)
 {
-    int value = (int)GetPrivateProfileIntA("position", name, fallback, ini);
+    int value = ini_number("position", name, fallback);
 
     return value < 0 || value > 90 ? fallback : value;
 }
@@ -122,7 +170,7 @@ static void load_position(void)
 {
     char corner[24];
 
-    GetPrivateProfileStringA("position", "corner", "", corner, sizeof corner, ini);
+    ini_get("position", "corner", corner, sizeof corner);
     CharLowerA(corner);
     /* anything unrecognised keeps the current value */
     if (strstr(corner, "top"))
@@ -145,17 +193,28 @@ static int save_position(void)
              POSITION.right ? "right" : "left");
     snprintf(x, sizeof x, "%d", POSITION.margin_x);
     snprintf(y, sizeof y, "%d", POSITION.margin_y);
-    return WritePrivateProfileStringA("position", "corner", corner, ini)
-           && WritePrivateProfileStringA("position", "margin_x", x, ini)
-           && WritePrivateProfileStringA("position", "margin_y", y, ini);
+    return ini_set("position", "corner", corner) && ini_set("position", "margin_x", x)
+           && ini_set("position", "margin_y", y);
+}
+
+/* A default key the file already gives to another option would switch both: drop it. */
+static void drop_taken_defaults(const int *from_file)
+{
+    int i, j;
+
+    for (i = 0; i < OPT_COUNT; i++)
+        for (j = 0; !from_file[i] && j < OPT_COUNT; j++)
+            if (from_file[j] && OPTIONS[j].key == OPTIONS[i].key)
+                OPTIONS[i].key = 0;
 }
 
 void settings_load(const char *path)
 {
+    int from_file[OPT_COUNT] = {0};
     char value[16];
     int i;
 
-    snprintf(ini, sizeof ini, "%s", path);
+    to_wide(path, ini, PATH_WIDE);
     if (!create_file())
         add_position_section();
     load_position();
@@ -163,12 +222,23 @@ void settings_load(const char *path)
         struct option *o = &OPTIONS[i];
 
         /* name options added since the file was written */
-        if (!GetPrivateProfileStringA("options", o->name, "", value, sizeof value, ini))
+        if (!ini_get("options", o->name, value, sizeof value))
             save_option(o);
-        o->enabled = GetPrivateProfileIntA("options", o->name, o->enabled, ini) != 0;
-        if (GetPrivateProfileStringA("keys", o->name, "", value, sizeof value, ini))
+        o->enabled = ini_number("options", o->name, o->enabled) != 0;
+        if (ini_get("keys", o->name, value, sizeof value)) {
             o->key = parse_key(value, o->key);
+            from_file[i] = 1;
+        }
     }
+    drop_taken_defaults(from_file);
+    /* and name the keys of options added since the file was written */
+    for (i = 0; i < OPT_COUNT; i++)
+        if (!from_file[i]) {
+            char key[8];
+
+            key_name(OPTIONS[i].key, key);
+            ini_set("keys", OPTIONS[i].name, OPTIONS[i].key ? key : "none");
+        }
 }
 
 int settings_toggle(int option)
@@ -185,8 +255,7 @@ int settings_toggle(int option)
 
             key_name(OPTIONS[i].key, key);
             saved &= save_option(&OPTIONS[i]);
-            saved &= WritePrivateProfileStringA("keys", OPTIONS[i].name,
-                                                OPTIONS[i].key ? key : "none", ini) != 0;
+            saved &= ini_set("keys", OPTIONS[i].name, OPTIONS[i].key ? key : "none");
         }
         return saved & save_position();
     }

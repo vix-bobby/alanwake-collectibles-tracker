@@ -39,6 +39,17 @@ if [ "${1:-}" = test ]; then
     mkdir "$scratch/steam"
     cp build/steam_test.exe "$scratch/steam/"
     (cd "$scratch/steam" && ./steam_test.exe)
+    # the whole mod from a new folder with a name that fits no single code page: the log and
+    # settings must land there. A new program path also makes Windows add its own hook.
+    odd="$scratch/Игра Łódź"
+    mkdir "$odd"
+    cp build/d3d9.dll build/harness.exe "$odd/"
+    (
+        ALANWAKE_COLLECTIBLES_PROFILE=$(wslpath -w "$config")
+        export ALANWAKE_COLLECTIBLES_PROFILE WSLENV=ALANWAKE_COLLECTIBLES_PROFILE
+        cd "$odd" && ./harness.exe ./d3d9.dll
+        grep -q 'Игра Łódź' alanwake_collectibles.log && [ -f alanwake_collectibles.ini ]
+    )
     rm -rf "$scratch"
     rm -f build/alanwake_collectibles.ini
     (
