@@ -110,6 +110,7 @@ does not use the network. As with any DLL of this kind, an antivirus may flag it
 TESTED
 Steam version only, on Windows and on Linux (Steam Deck).
 
-LICENCE
+LICENCE AND SOURCE
 MIT, copyright vix-bobby: you may share and adapt this mod. See
 AlanWakeCollectibles-LICENSE.txt.
+Source code: https://github.com/vix-bobby/alanwake-collectibles-tracker
